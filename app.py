@@ -508,24 +508,52 @@ with tab2:
                 mc3.metric("⏳ BATCH Pendiente", pend_b)
                 mc4.metric("⏳ Cant. Pendiente", f"{pend_c:,.2f}")
 
-                ci1, ci2, ci3 = st.columns([2, 2, 1])
-                with ci1:
-                    nuevo_batch = st.number_input("BATCH producidos", min_value=0, max_value=bp*3,
-                                                  value=br, step=1, key=f"batch_{ukey}")
-                with ci2:
-                    nueva_cant  = st.number_input("Cantidad producida", min_value=0.0, max_value=float(cp*3),
-                                                  value=float(cr), step=0.5, format="%.2f", key=f"cant_{ukey}")
-                with ci3:
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    if st.button("💾 Guardar", key=f"save_{ukey}", use_container_width=True):
-                        datos = {"batch_real": nuevo_batch, "cant_real": nueva_cant,
-                                 "timestamp": datetime.now().isoformat(),
-                                 "codigo": row["CODIGO"], "producto": row["PRODUCTO"], "fecha": fecha_str}
-                        with st.spinner("Guardando..."):
-                            guardar_produccion_gsheet(k, datos)
-                        st.success(f"✅ Guardado en Google Sheets — Pend: {max(bp-nuevo_batch,0)} BATCH")
-                        time.sleep(0.5)
-                        st.rerun()
+                # Si ya está completo, bloquear ingreso
+                if pend_b == 0:
+                    st.success(f"✅ Completado — {br} de {bp} BATCH producidos. No hay pendientes.")
+                else:
+                    st.markdown(f"**Ingresa los BATCH que produces ahora** (pendiente: {pend_b} BATCH · {pend_c:,.2f} unid.)")
+                    ci1, ci2, ci3 = st.columns([2, 2, 1])
+                    with ci1:
+                        nuevo_batch = st.number_input(
+                            "BATCH a registrar ahora",
+                            min_value=0, max_value=pend_b,
+                            value=0, step=1,
+                            key=f"batch_{ukey}"
+                        )
+                    with ci2:
+                        nueva_cant = st.number_input(
+                            "Cantidad a registrar ahora",
+                            min_value=0.0, max_value=float(pend_c) if pend_c > 0 else float(cp),
+                            value=0.0, step=0.5, format="%.2f",
+                            key=f"cant_{ukey}"
+                        )
+                    with ci3:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("💾 Registrar", key=f"save_{ukey}", use_container_width=True):
+                            if nuevo_batch == 0:
+                                st.warning("⚠️ Ingresa al menos 1 BATCH")
+                            else:
+                                # ACUMULAR: sumar al total ya producido
+                                batch_acum = br + nuevo_batch
+                                cant_acum  = cr + nueva_cant
+                                datos = {
+                                    "batch_real": batch_acum,
+                                    "cant_real":  cant_acum,
+                                    "timestamp":  datetime.now().isoformat(),
+                                    "codigo":     row["CODIGO"],
+                                    "producto":   row["PRODUCTO"],
+                                    "fecha":      fecha_str
+                                }
+                                with st.spinner("Guardando..."):
+                                    guardar_produccion_gsheet(k, datos)
+                                pend_nuevo = max(bp - batch_acum, 0)
+                                if pend_nuevo == 0:
+                                    st.success(f"✅ ¡Completado! {batch_acum} de {bp} BATCH producidos.")
+                                else:
+                                    st.success(f"✅ Registrado — Total: {batch_acum}/{bp} BATCH · Pendiente: {pend_nuevo} BATCH")
+                                time.sleep(0.5)
+                                st.rerun()
 
         st.markdown("---")
         if st.button("💾 GUARDAR TODO DE UNA VEZ", type="primary", use_container_width=True):
@@ -715,24 +743,49 @@ with tab4:
                     fm3.metric("BATCH Pendiente", pend_b_f)
                     fm4.metric("Cant. Pendiente", f"{pend_c_f:,.2f}")
 
-                    fi1, fi2, fi3 = st.columns([2,2,1])
-                    with fi1:
-                        nb_fifo = st.number_input("BATCH a declarar", min_value=0, max_value=bp_f*2,
-                                                  value=br_f, step=1, key=f"nbatch_{ukey_f}")
-                    with fi2:
-                        nc_fifo = st.number_input("Cantidad a declarar", min_value=0.0, max_value=float(cp_f*2),
-                                                  value=float(cr_f), step=0.5, format="%.2f", key=f"ncant_{ukey_f}")
-                    with fi3:
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        if st.button("💾 Guardar", key=f"nsave_{ukey_f}", use_container_width=True):
-                            datos = {"batch_real": nb_fifo, "cant_real": nc_fifo,
-                                     "timestamp": datetime.now().isoformat(),
-                                     "codigo": codigo_sel, "producto": nombre_prod, "fecha": f_str}
-                            with st.spinner("Guardando..."):
-                                guardar_produccion_gsheet(k_f, datos)
-                                st.success(f"✅ Guardado — Pendiente: {max(bp_f-nb_fifo,0)} BATCH")
-                            time.sleep(0.5)
-                            st.rerun()
+                    if pend_b_f == 0:
+                        st.success(f"✅ Completado — {br_f} de {bp_f} BATCH producidos.")
+                    else:
+                        st.markdown(f"**Ingresa los BATCH que produces ahora** (pendiente: {pend_b_f} BATCH)")
+                        fi1, fi2, fi3 = st.columns([2,2,1])
+                        with fi1:
+                            nb_fifo = st.number_input(
+                                "BATCH a registrar ahora",
+                                min_value=0, max_value=pend_b_f,
+                                value=0, step=1, key=f"nbatch_{ukey_f}"
+                            )
+                        with fi2:
+                            nc_fifo = st.number_input(
+                                "Cantidad a registrar ahora",
+                                min_value=0.0,
+                                max_value=float(pend_c_f) if pend_c_f > 0 else float(cp_f),
+                                value=0.0, step=0.5, format="%.2f", key=f"ncant_{ukey_f}"
+                            )
+                        with fi3:
+                            st.markdown("<br>", unsafe_allow_html=True)
+                            if st.button("💾 Registrar", key=f"nsave_{ukey_f}", use_container_width=True):
+                                if nb_fifo == 0:
+                                    st.warning("⚠️ Ingresa al menos 1 BATCH")
+                                else:
+                                    batch_acum = br_f + nb_fifo
+                                    cant_acum  = cr_f + nc_fifo
+                                    datos = {
+                                        "batch_real": batch_acum,
+                                        "cant_real":  cant_acum,
+                                        "timestamp":  datetime.now().isoformat(),
+                                        "codigo":     codigo_sel,
+                                        "producto":   nombre_prod,
+                                        "fecha":      f_str
+                                    }
+                                    with st.spinner("Guardando..."):
+                                        guardar_produccion_gsheet(k_f, datos)
+                                    pend_nuevo = max(bp_f - batch_acum, 0)
+                                    if pend_nuevo == 0:
+                                        st.success(f"✅ ¡Completado! {batch_acum} de {bp_f} BATCH producidos.")
+                                    else:
+                                        st.success(f"✅ Registrado — Total: {batch_acum}/{bp_f} BATCH · Pendiente: {pend_nuevo}")
+                                    time.sleep(0.5)
+                                    st.rerun()
 
             st.markdown("---")
             df_fr = detalle_prod[["fecha_str","BATCH_PLAN","BATCH_REAL","BATCH_PEND","CANT_PLAN","CANT_REAL","CANT_PEND"]].copy()
