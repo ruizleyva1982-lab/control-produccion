@@ -8,6 +8,8 @@ from google.oauth2.service_account import Credentials
 # session state
 if "produccion_real" not in st.session_state:
     st.session_state.produccion_real = {}
+if "sheets_cargado" not in st.session_state:
+    st.session_state.sheets_cargado = False
 
 st.set_page_config(
     page_title="Control de Producción",
@@ -251,6 +253,7 @@ with st.sidebar:
         cargar_productos_gsheet.clear()
         cargar_programacion_gsheet.clear()
         st.session_state.produccion_real = cargar_produccion_gsheet()
+        st.session_state.sheets_cargado  = True
         st.rerun()
 
     st.markdown("---")
@@ -270,16 +273,16 @@ try:
     with st.spinner("Cargando datos..."):
         df_productos    = cargar_productos_gsheet()
         df_programacion = cargar_programacion_gsheet()
-        # Siempre leer produccion_real fresco desde Sheets
-        produccion_real = cargar_produccion_gsheet()
-        # Sincronizar con session_state
-        st.session_state.produccion_real = produccion_real
+        # Solo cargar desde Sheets la primera vez que abre la sesión
+        if not st.session_state.sheets_cargado:
+            st.session_state.produccion_real = cargar_produccion_gsheet()
+            st.session_state.sheets_cargado  = True
 except Exception as e:
     st.error(f"❌ Error conectando con Google Sheets: {e}")
     st.info("Verifica que los secrets de Streamlit estén configurados correctamente.")
     st.stop()
 
-# Usar siempre session_state como fuente de verdad local
+# Fuente de verdad: siempre session_state (se actualiza al guardar)
 produccion_real = st.session_state.produccion_real
 
 if df_productos.empty:
