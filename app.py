@@ -5,6 +5,10 @@ import json, io, time
 import gspread
 from google.oauth2.service_account import Credentials
 
+# session state
+if "produccion_real" not in st.session_state:
+    st.session_state.produccion_real = {}
+
 st.set_page_config(
     page_title="Control de Producción",
     page_icon="🏭",
@@ -105,7 +109,6 @@ def cargar_programacion_gsheet() -> pd.DataFrame:
         df["Fecha de Vencimiento"] = pd.to_datetime(df["Fecha de Vencimiento"], errors="coerce")
     return df
 
-@st.cache_data(ttl=0)
 def cargar_produccion_gsheet() -> dict:
     sh   = get_spreadsheet()
     ws   = sh.worksheet("PRODUCCION_REAL")
@@ -125,34 +128,37 @@ def cargar_produccion_gsheet() -> dict:
     return result
 
 def guardar_produccion_gsheet(key: str, datos: dict):
-    sh = get_spreadsheet()
-    ws = sh.worksheet("PRODUCCION_REAL")
-    fila = [
-        key,
-        datos.get("batch_real", 0),
-        datos.get("cant_real", 0.0),
-        datos.get("timestamp",""),
-        datos.get("codigo",""),
-        datos.get("producto",""),
-        datos.get("fecha",""),
-    ]
-    # Asegurar encabezado
-    todos = ws.get_all_values()
-    if not todos:
-        ws.append_row(["key","batch_real","cant_real","timestamp","codigo","producto","fecha"])
-        todos = [["key","batch_real","cant_real","timestamp","codigo","producto","fecha"]]
+    # 1. Actualizar session_state inmediatamente (refleja en pantalla al instante)
+    st.session_state.produccion_real[key] = datos
 
-    # Buscar si ya existe la fila con ese key
-    row_num = None
-    for i, row in enumerate(todos):
-        if row and row[0] == key:
-            row_num = i + 1
-            break
-
-    if row_num:
-        ws.update(f"A{row_num}:G{row_num}", [fila])
-    else:
-        ws.append_row(fila)
+    # 2. Guardar en Google Sheets en segundo plano
+    try:
+        sh = get_spreadsheet()
+        ws = sh.worksheet("PRODUCCION_REAL")
+        fila = [
+            key,
+            datos.get("batch_real", 0),
+            datos.get("cant_real", 0.0),
+            datos.get("timestamp",""),
+            datos.get("codigo",""),
+            datos.get("producto",""),
+            datos.get("fecha",""),
+        ]
+        todos = ws.get_all_values()
+        if not todos:
+            ws.append_row(["key","batch_real","cant_real","timestamp","codigo","producto","fecha"])
+            todos = [["key","batch_real","cant_real","timestamp","codigo","producto","fecha"]]
+        row_num = None
+        for i, r in enumerate(todos):
+            if r and r[0] == key:
+                row_num = i + 1
+                break
+        if row_num:
+            ws.update(f"A{row_num}:G{row_num}", [fila])
+        else:
+            ws.append_row(fila)
+    except Exception as e:
+        st.warning(f"⚠️ Guardado local OK, pero error en Google Sheets: {e}")
 
 def init_hoja_produccion():
     """Crea encabezado en PRODUCCION_REAL si está vacía."""
@@ -242,7 +248,9 @@ with st.sidebar:
 
     st.markdown("---")
     if st.button("🔃 Recargar datos", use_container_width=True):
-        st.cache_data.clear()
+        cargar_productos_gsheet.clear()
+        cargar_programacion_gsheet.clear()
+        st.session_state.produccion_real = cargar_produccion_gsheet()
         st.rerun()
 
     st.markdown("---")
@@ -262,11 +270,17 @@ try:
     with st.spinner("Cargando datos..."):
         df_productos    = cargar_productos_gsheet()
         df_programacion = cargar_programacion_gsheet()
+        # Siempre leer produccion_real fresco desde Sheets
         produccion_real = cargar_produccion_gsheet()
+        # Sincronizar con session_state
+        st.session_state.produccion_real = produccion_real
 except Exception as e:
     st.error(f"❌ Error conectando con Google Sheets: {e}")
     st.info("Verifica que los secrets de Streamlit estén configurados correctamente.")
     st.stop()
+
+# Usar siempre session_state como fuente de verdad local
+produccion_real = st.session_state.produccion_real
 
 if df_productos.empty:
     st.warning("⚠️ No hay productos cargados. Sube el `maestro_productos.xlsx` desde la barra lateral.")
@@ -506,7 +520,6 @@ with tab2:
                                  "codigo": row["CODIGO"], "producto": row["PRODUCTO"], "fecha": fecha_str}
                         with st.spinner("Guardando..."):
                             guardar_produccion_gsheet(k, datos)
-                        st.cache_data.clear()
                         st.success(f"✅ Guardado en Google Sheets — Pend: {max(bp-nuevo_batch,0)} BATCH")
                         time.sleep(0.5)
                         st.rerun()
@@ -525,7 +538,6 @@ with tab2:
                                  "codigo": row["CODIGO"], "producto": row["PRODUCTO"], "fecha": fecha_str}
                         guardar_produccion_gsheet(k, datos)
                         cambios += 1
-            st.cache_data.clear()
             st.success(f"✅ {cambios} registros guardados en Google Sheets")
             time.sleep(0.5)
             st.rerun()
@@ -715,8 +727,7 @@ with tab4:
                                      "codigo": codigo_sel, "producto": nombre_prod, "fecha": f_str}
                             with st.spinner("Guardando..."):
                                 guardar_produccion_gsheet(k_f, datos)
-                            st.cache_data.clear()
-                            st.success(f"✅ Guardado — Pendiente: {max(bp_f-nb_fifo,0)} BATCH")
+                                st.success(f"✅ Guardado — Pendiente: {max(bp_f-nb_fifo,0)} BATCH")
                             time.sleep(0.5)
                             st.rerun()
 
