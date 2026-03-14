@@ -127,33 +127,32 @@ def cargar_produccion_gsheet() -> dict:
 def guardar_produccion_gsheet(key: str, datos: dict):
     sh = get_spreadsheet()
     ws = sh.worksheet("PRODUCCION_REAL")
+    fila = [
+        key,
+        datos.get("batch_real", 0),
+        datos.get("cant_real", 0.0),
+        datos.get("timestamp",""),
+        datos.get("codigo",""),
+        datos.get("producto",""),
+        datos.get("fecha",""),
+    ]
+    # Asegurar encabezado
+    todos = ws.get_all_values()
+    if not todos:
+        ws.append_row(["key","batch_real","cant_real","timestamp","codigo","producto","fecha"])
+        todos = [["key","batch_real","cant_real","timestamp","codigo","producto","fecha"]]
+
     # Buscar si ya existe la fila con ese key
-    try:
-        cell = ws.find(key, in_column=1)
-        row_num = cell.row
-        ws.update(f"A{row_num}:G{row_num}", [[
-            key,
-            datos.get("batch_real", 0),
-            datos.get("cant_real", 0.0),
-            datos.get("timestamp",""),
-            datos.get("codigo",""),
-            datos.get("producto",""),
-            datos.get("fecha",""),
-        ]])
-    except gspread.exceptions.CellNotFound:
-        # No existe, agregar nueva fila
-        # Si la hoja está vacía, agregar encabezado primero
-        if ws.row_count == 0 or ws.acell("A1").value != "key":
-            ws.append_row(["key","batch_real","cant_real","timestamp","codigo","producto","fecha"])
-        ws.append_row([
-            key,
-            datos.get("batch_real", 0),
-            datos.get("cant_real", 0.0),
-            datos.get("timestamp",""),
-            datos.get("codigo",""),
-            datos.get("producto",""),
-            datos.get("fecha",""),
-        ])
+    row_num = None
+    for i, row in enumerate(todos):
+        if row and row[0] == key:
+            row_num = i + 1
+            break
+
+    if row_num:
+        ws.update(f"A{row_num}:G{row_num}", [fila])
+    else:
+        ws.append_row(fila)
     cargar_produccion_gsheet.clear()
 
 def init_hoja_produccion():
@@ -745,4 +744,3 @@ st.markdown(
     f'{dias_cargados} día(s) cargado(s)</p>',
     unsafe_allow_html=True
 )
-
