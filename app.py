@@ -396,7 +396,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "📋 Tablero de Control",
     "✍️ Registro de Producción",
     "📊 Resumen por Línea",
-    "🕐 Pendientes Históricos FIFO"
+    "⚠️ Ver Pateadas"
 ])
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -632,7 +632,7 @@ with tab3:
 # TAB 4 — PENDIENTES HISTÓRICOS FIFO
 # ══════════════════════════════════════════════════════════════════════════════
 with tab4:
-    st.markdown('<div class="section-title">🕐 Pendientes Históricos por Producto — Método FIFO</div>',
+    st.markdown('<div class="section-title">⚠️ Ver Pateadas — Pendientes por Producto</div>',
                 unsafe_allow_html=True)
     st.markdown("Selecciona un producto y ve todos sus BATCH pendientes de **más antiguo a más reciente**.")
 
