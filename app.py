@@ -10,6 +10,8 @@ if "produccion_real" not in st.session_state:
     st.session_state.produccion_real = {}
 if "sheets_cargado" not in st.session_state:
     st.session_state.sheets_cargado = False
+if "registro_count" not in st.session_state:
+    st.session_state.registro_count = 0
 
 st.set_page_config(
     page_title="Control de Producción",
@@ -260,10 +262,16 @@ with st.sidebar:
     st.caption("🏭 **Control de Producción v5.0**\nGoogle Sheets · Datos persistentes")
 
 # ── HEADER ────────────────────────────────────────────────────────────────────
-st.markdown("""
+st.markdown(f"""
 <div class="main-header">
-  <h1>🏭 Control de Producción</h1>
-  <p>Seguimiento en tiempo real · Datos persistentes en Google Sheets</p>
+  <div style="display:flex;align-items:center;gap:1.5rem;">
+    <img src="data:image/jpeg;base64,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"
+         style="height:80px;width:80px;object-fit:contain;border-radius:10px;background:#fff;padding:6px;">
+    <div>
+      <h1 style="font-size:2.6rem;margin:0;">Control de Producción</h1>
+      <p style="margin:0.3rem 0 0;">Seguimiento en tiempo real · Datos persistentes en Google Sheets</p>
+    </div>
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -530,7 +538,7 @@ with tab2:
                         )
                     with ci3:
                         st.markdown("<br>", unsafe_allow_html=True)
-                        if st.button("💾 Registrar", key=f"save_{ukey}", use_container_width=True):
+                        if st.button("💾 Registrar", key=f"save_{ukey}_{st.session_state.registro_count}", use_container_width=True):
                             if nuevo_batch == 0:
                                 st.warning("⚠️ Ingresa al menos 1 BATCH")
                             else:
@@ -547,6 +555,7 @@ with tab2:
                                 }
                                 with st.spinner("Guardando..."):
                                     guardar_produccion_gsheet(k, datos)
+                                st.session_state.registro_count += 1
                                 pend_nuevo = max(bp - batch_acum, 0)
                                 if pend_nuevo == 0:
                                     st.success(f"✅ ¡Completado! {batch_acum} de {bp} BATCH producidos.")
@@ -752,18 +761,18 @@ with tab4:
                             nb_fifo = st.number_input(
                                 "BATCH a registrar ahora",
                                 min_value=0, max_value=pend_b_f,
-                                value=0, step=1, key=f"nbatch_{ukey_f}"
+                                value=0, step=1, key=f"nbatch_{ukey_f}_{st.session_state.registro_count}"
                             )
                         with fi2:
                             nc_fifo = st.number_input(
                                 "Cantidad a registrar ahora",
                                 min_value=0.0,
                                 max_value=float(pend_c_f) if pend_c_f > 0 else float(cp_f),
-                                value=0.0, step=0.5, format="%.2f", key=f"ncant_{ukey_f}"
+                                value=0.0, step=0.5, format="%.2f", key=f"ncant_{ukey_f}_{st.session_state.registro_count}"
                             )
                         with fi3:
                             st.markdown("<br>", unsafe_allow_html=True)
-                            if st.button("💾 Registrar", key=f"nsave_{ukey_f}", use_container_width=True):
+                            if st.button("💾 Registrar", key=f"nsave_{ukey_f}_{st.session_state.registro_count}", use_container_width=True):
                                 if nb_fifo == 0:
                                     st.warning("⚠️ Ingresa al menos 1 BATCH")
                                 else:
@@ -779,6 +788,7 @@ with tab4:
                                     }
                                     with st.spinner("Guardando..."):
                                         guardar_produccion_gsheet(k_f, datos)
+                                    st.session_state.registro_count += 1
                                     pend_nuevo = max(bp_f - batch_acum, 0)
                                     if pend_nuevo == 0:
                                         st.success(f"✅ ¡Completado! {batch_acum} de {bp_f} BATCH producidos.")
