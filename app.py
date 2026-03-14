@@ -105,7 +105,7 @@ def cargar_programacion_gsheet() -> pd.DataFrame:
         df["Fecha de Vencimiento"] = pd.to_datetime(df["Fecha de Vencimiento"], errors="coerce")
     return df
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=0)
 def cargar_produccion_gsheet() -> dict:
     sh   = get_spreadsheet()
     ws   = sh.worksheet("PRODUCCION_REAL")
@@ -153,7 +153,6 @@ def guardar_produccion_gsheet(key: str, datos: dict):
         ws.update(f"A{row_num}:G{row_num}", [fila])
     else:
         ws.append_row(fila)
-    cargar_produccion_gsheet.clear()
 
 def init_hoja_produccion():
     """Crea encabezado en PRODUCCION_REAL si está vacía."""
@@ -243,9 +242,7 @@ with st.sidebar:
 
     st.markdown("---")
     if st.button("🔃 Recargar datos", use_container_width=True):
-        cargar_productos_gsheet.clear()
-        cargar_programacion_gsheet.clear()
-        cargar_produccion_gsheet.clear()
+        st.cache_data.clear()
         st.rerun()
 
     st.markdown("---")
@@ -509,6 +506,7 @@ with tab2:
                                  "codigo": row["CODIGO"], "producto": row["PRODUCTO"], "fecha": fecha_str}
                         with st.spinner("Guardando..."):
                             guardar_produccion_gsheet(k, datos)
+                        st.cache_data.clear()
                         st.success(f"✅ Guardado en Google Sheets — Pend: {max(bp-nuevo_batch,0)} BATCH")
                         time.sleep(0.5)
                         st.rerun()
@@ -527,6 +525,7 @@ with tab2:
                                  "codigo": row["CODIGO"], "producto": row["PRODUCTO"], "fecha": fecha_str}
                         guardar_produccion_gsheet(k, datos)
                         cambios += 1
+            st.cache_data.clear()
             st.success(f"✅ {cambios} registros guardados en Google Sheets")
             time.sleep(0.5)
             st.rerun()
@@ -716,6 +715,7 @@ with tab4:
                                      "codigo": codigo_sel, "producto": nombre_prod, "fecha": f_str}
                             with st.spinner("Guardando..."):
                                 guardar_produccion_gsheet(k_f, datos)
+                            st.cache_data.clear()
                             st.success(f"✅ Guardado — Pendiente: {max(bp_f-nb_fifo,0)} BATCH")
                             time.sleep(0.5)
                             st.rerun()
