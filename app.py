@@ -72,12 +72,34 @@ div[data-testid="stExpander"] span { color: #1a1a2e !important; }
 """, unsafe_allow_html=True)
 
 # ── SESSION STATE ─────────────────────────────────────────────────────────────
-if "produccion_real" not in st.session_state:
-    st.session_state.produccion_real = {}
-if "df_productos" not in st.session_state:
-    st.session_state.df_productos = None
-if "df_programacion" not in st.session_state:
-    st.session_state.df_programacion = pd.DataFrame()
+# Guardamos bytes crudos para sobrevivir reruns sin perder datos
+for _k, _v in [
+    ("produccion_real", {}),
+    ("bytes_productos", None),       # bytes del maestro_productos.xlsx
+    ("bytes_programacion", {}),      # dict {nombre: bytes} de archivos diarios
+]:
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
+
+# Reconstruir DataFrames desde bytes en cada ejecución
+@st.cache_data(show_spinner=False)
+def _df_productos_cached(b: bytes) -> pd.DataFrame:
+    return leer_productos(b)
+
+@st.cache_data(show_spinner=False)
+def _df_prog_cached(nombre: str, b: bytes) -> pd.DataFrame:
+    return leer_programacion_archivo(b, nombre)
+
+def get_df_productos():
+    if st.session_state.bytes_productos is None:
+        return None
+    return _df_productos_cached(st.session_state.bytes_productos)
+
+def get_df_programacion():
+    if not st.session_state.bytes_programacion:
+        return pd.DataFrame()
+    frames = [_df_prog_cached(n, b) for n, b in st.session_state.bytes_programacion.items()]
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 # ── FUNCIONES ─────────────────────────────────────────────────────────────────
 def leer_productos(file_bytes) -> pd.DataFrame:
@@ -119,46 +141,56 @@ with st.sidebar:
 
     # Maestro de productos
     st.markdown('<div class="upload-title">1️⃣ Maestro de Productos</div>', unsafe_allow_html=True)
-    st.caption("Sube `maestro_productos.xlsx` — solo necesitas hacerlo una vez (o cuando haya cambios).")
+    st.caption("Sube `maestro_productos.xlsx` — solo una vez (o cuando haya cambios).")
     f_productos = st.file_uploader("", type=["xlsx"], key="up_productos", label_visibility="collapsed")
-    if f_productos:
-        try:
-            st.session_state.df_productos = leer_productos(f_productos.read())
-            st.success(f"✅ {len(st.session_state.df_productos)} productos cargados")
-        except Exception as e:
-            st.error(f"❌ Error: {e}")
+    if f_productos is not None:
+        b = f_productos.read()
+        if b != st.session_state.bytes_productos:
+            st.session_state.bytes_productos = b
+            _df_productos_cached.clear()
+    df_prod_check = get_df_productos()
+    if df_prod_check is not None:
+        st.success(f"✅ {len(df_prod_check)} productos cargados")
+    else:
+        st.warning("⬆️ Sube el maestro de productos")
 
     st.markdown("---")
 
     # Archivos de programación diaria
     st.markdown('<div class="upload-title">2️⃣ Programación Diaria</div>', unsafe_allow_html=True)
-    st.caption("Sube uno o varios archivos `YYYYMMDD.xlsx`. Puedes acumular varios días.")
+    st.caption("Sube uno o varios `YYYYMMDD.xlsx`. Se acumulan entre sí.")
     f_programacion = st.file_uploader("", type=["xlsx"], accept_multiple_files=True,
                                       key="up_prog", label_visibility="collapsed")
     if f_programacion:
-        frames = []
-        nombres = []
+        nuevos = 0
         for f in f_programacion:
-            try:
-                df_dia = leer_programacion_archivo(f.read(), f.name)
-                frames.append(df_dia)
-                nombres.append(f.name)
-            except Exception as e:
-                st.warning(f"⚠️ {f.name}: {e}")
-        if frames:
-            st.session_state.df_programacion = pd.concat(frames, ignore_index=True)
-            st.success(f"✅ {len(nombres)} archivo(s) cargado(s):\n" + "\n".join(f"• {n}" for n in nombres))
+            b = f.read()
+            if f.name not in st.session_state.bytes_programacion or st.session_state.bytes_programacion[f.name] != b:
+                st.session_state.bytes_programacion[f.name] = b
+                _df_prog_cached.clear()
+                nuevos += 1
+        if nuevos:
+            st.success(f"✅ {nuevos} archivo(s) nuevo(s) agregado(s)")
+    nombres_cargados = list(st.session_state.bytes_programacion.keys())
+    if nombres_cargados:
+        st.success(f"📅 {len(nombres_cargados)} día(s) en memoria")
+        for n in sorted(nombres_cargados):
+            st.caption(f"• {n}")
+    else:
+        st.warning("⬆️ Sube al menos un archivo de programación")
 
     st.markdown("---")
 
-    # Importar produccion_real.json guardado anteriormente
+    # Importar produccion_real.json
     st.markdown('<div class="upload-title">3️⃣ Cargar avances previos (opcional)</div>', unsafe_allow_html=True)
-    st.caption("Si ya trabajaste antes, sube el `produccion_real.json` para continuar donde dejaste.")
+    st.caption("Sube el `produccion_real.json` del día anterior para continuar.")
     f_json = st.file_uploader("", type=["json"], key="up_json", label_visibility="collapsed")
-    if f_json:
+    if f_json is not None:
         try:
-            st.session_state.produccion_real = json.load(f_json)
-            st.success(f"✅ {len(st.session_state.produccion_real)} registros cargados")
+            datos = json.load(f_json)
+            if datos != st.session_state.produccion_real:
+                st.session_state.produccion_real = datos
+                st.success(f"✅ {len(datos)} registros cargados")
         except Exception as e:
             st.error(f"❌ Error: {e}")
 
@@ -188,12 +220,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── VALIDAR QUE HAYA DATOS ────────────────────────────────────────────────────
-df_productos    = st.session_state.df_productos
-df_programacion = st.session_state.df_programacion
+df_productos    = get_df_productos()
+df_programacion = get_df_programacion()
 produccion_real = st.session_state.produccion_real
 
-falta_prod = df_productos is None
-falta_prog = df_programacion.empty
+falta_prod = df_productos is None or len(df_productos) == 0
+falta_prog = df_programacion is None or (hasattr(df_programacion, "empty") and df_programacion.empty)
 
 if falta_prod or falta_prog:
     col_a, col_b = st.columns(2)
