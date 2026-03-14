@@ -564,23 +564,7 @@ with tab2:
                                 time.sleep(0.5)
                                 st.rerun()
 
-        st.markdown("---")
-        if st.button("💾 GUARDAR TODO DE UNA VEZ", type="primary", use_container_width=True):
-            with st.spinner("Guardando todos los registros..."):
-                cambios = 0
-                for pos, (_, row) in enumerate(df_con_prog.iterrows()):
-                    k    = key_reg(fecha_str, row["CODIGO"])
-                    ukey = f"{k}||{pos}"
-                    bk, ck = f"batch_{ukey}", f"cant_{ukey}"
-                    if bk in st.session_state:
-                        datos = {"batch_real": st.session_state[bk], "cant_real": st.session_state[ck],
-                                 "timestamp": datetime.now().isoformat(),
-                                 "codigo": row["CODIGO"], "producto": row["PRODUCTO"], "fecha": fecha_str}
-                        guardar_produccion_gsheet(k, datos)
-                        cambios += 1
-            st.success(f"✅ {cambios} registros guardados en Google Sheets")
-            time.sleep(0.5)
-            st.rerun()
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — RESUMEN POR LÍNEA
