@@ -139,6 +139,8 @@ def guardar_produccion_gsheet(key: str, datos: dict):
     try:
         sh  = get_spreadsheet()
         ws  = sh.worksheet("PRODUCCION_REAL")
+        st.info(f"🔍 DEBUG: Conectado a sheet. Worksheet: {ws.title}, filas: {ws.row_count}")
+
         fila = [
             key,
             datos.get("batch_real", 0),
@@ -148,12 +150,17 @@ def guardar_produccion_gsheet(key: str, datos: dict):
             datos.get("producto",""),
             datos.get("fecha",""),
         ]
+        st.info(f"🔍 DEBUG: Fila a guardar: {fila}")
+
         todos = ws.get_all_values()
+        st.info(f"🔍 DEBUG: Valores actuales en sheet: {len(todos)} filas")
+
         # Si está vacía o no tiene encabezado, crearlo
         if not todos or todos[0][0] != "key":
             ws.clear()
             ws.append_row(["key","batch_real","cant_real","timestamp","codigo","producto","fecha"])
             todos = [["key","batch_real","cant_real","timestamp","codigo","producto","fecha"]]
+            st.info("🔍 DEBUG: Encabezado creado")
 
         # Buscar si ya existe el key para actualizar, o agregar nueva fila
         row_num = None
@@ -164,8 +171,12 @@ def guardar_produccion_gsheet(key: str, datos: dict):
 
         if row_num:
             ws.update(f"A{row_num}:G{row_num}", [fila])
+            st.info(f"🔍 DEBUG: Actualizado en fila {row_num}")
         else:
             ws.append_row(fila)
+            st.info(f"🔍 DEBUG: Nueva fila agregada")
+
+        st.success("✅ Guardado en Google Sheets correctamente")
 
     except Exception as e:
         import traceback
