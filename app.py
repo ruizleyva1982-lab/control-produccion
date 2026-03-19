@@ -168,7 +168,9 @@ def guardar_produccion_gsheet(key: str, datos: dict):
             ws.append_row(fila)
 
     except Exception as e:
+        import traceback
         st.error(f"❌ Error al guardar en Google Sheets: {e}")
+        st.code(traceback.format_exc())
 
 def init_hoja_produccion():
     """Crea encabezado en PRODUCCION_REAL si está vacía."""
