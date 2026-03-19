@@ -132,13 +132,13 @@ def cargar_produccion_gsheet() -> dict:
     return result
 
 def guardar_produccion_gsheet(key: str, datos: dict):
-    # 1. Actualizar session_state inmediatamente (refleja en pantalla al instante)
+    # 1. Actualizar session_state inmediatamente
     st.session_state.produccion_real[key] = datos
 
-    # 2. Guardar en Google Sheets en segundo plano
+    # 2. Guardar en Google Sheets
     try:
-        sh = get_spreadsheet()
-        ws = sh.worksheet("PRODUCCION_REAL")
+        sh  = get_spreadsheet()
+        ws  = sh.worksheet("PRODUCCION_REAL")
         fila = [
             key,
             datos.get("batch_real", 0),
@@ -149,30 +149,38 @@ def guardar_produccion_gsheet(key: str, datos: dict):
             datos.get("fecha",""),
         ]
         todos = ws.get_all_values()
-        if not todos:
+        # Si está vacía o no tiene encabezado, crearlo
+        if not todos or todos[0][0] != "key":
+            ws.clear()
             ws.append_row(["key","batch_real","cant_real","timestamp","codigo","producto","fecha"])
             todos = [["key","batch_real","cant_real","timestamp","codigo","producto","fecha"]]
+
+        # Buscar si ya existe el key para actualizar, o agregar nueva fila
         row_num = None
         for i, r in enumerate(todos):
-            if r and r[0] == key:
+            if len(r) > 0 and r[0] == key:
                 row_num = i + 1
                 break
+
         if row_num:
             ws.update(f"A{row_num}:G{row_num}", [fila])
         else:
             ws.append_row(fila)
+
     except Exception as e:
-        st.warning(f"⚠️ Guardado local OK, pero error en Google Sheets: {e}")
+        st.error(f"❌ Error al guardar en Google Sheets: {e}")
 
 def init_hoja_produccion():
     """Crea encabezado en PRODUCCION_REAL si está vacía."""
     try:
         sh = get_spreadsheet()
         ws = sh.worksheet("PRODUCCION_REAL")
-        if not ws.get_all_values():
+        valores = ws.get_all_values()
+        if not valores or valores[0][0] != "key":
+            ws.clear()
             ws.append_row(["key","batch_real","cant_real","timestamp","codigo","producto","fecha"])
-    except Exception:
-        pass
+    except Exception as e:
+        st.warning(f"⚠️ No se pudo inicializar PRODUCCION_REAL: {e}")
 
 def key_reg(fecha_str: str, codigo: str) -> str:
     return f"{fecha_str}||{codigo}"
