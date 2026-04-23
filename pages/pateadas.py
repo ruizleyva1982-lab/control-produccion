@@ -78,19 +78,19 @@ if "pateadas_loaded" not in st.session_state:
 if "reg_count_p" not in st.session_state:
     st.session_state.reg_count_p = 0
 
-# ── RUTAS ─────────────────────────────────────────────────────────────────────
-BASE_DIR         = r"C:\Users\sergioruiz\Reportes\produccion"
-PRODUCTOS_FILE   = os.path.join(BASE_DIR, "maestro_productos.xlsx")
-PROGRAMACION_DIR = os.path.join(BASE_DIR, "programacion")
-PRODUCCION_FILE  = os.path.join(BASE_DIR, "produccion_real.json")
+# ── RUTAS (relativas al repo — funciona en Streamlit Cloud y local) ───────────
+_ROOT            = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR         = _ROOT
+PRODUCTOS_FILE   = os.path.join(_ROOT, "maestro_productos.xlsx")
+PROGRAMACION_DIR = os.path.join(_ROOT, "programacion")
+PRODUCCION_FILE  = os.path.join(_ROOT, "produccion_real.json")
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ Configuración")
-    base_dir_p    = st.text_input("📁 Carpeta base", value=BASE_DIR, key="base_p")
-    productos_path = os.path.join(base_dir_p, "maestro_productos.xlsx")
-    prog_dir       = os.path.join(base_dir_p, "programacion")
-    prod_file      = os.path.join(base_dir_p, "produccion_real.json")
+    productos_path = PRODUCTOS_FILE
+    prog_dir       = PROGRAMACION_DIR
+    prod_file      = PRODUCCION_FILE
 
     st.markdown("---")
     if st.button("🔃 Recargar datos", use_container_width=True):
