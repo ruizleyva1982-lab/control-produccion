@@ -1,828 +1,471 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
-import json, io, time
-import gspread
-from google.oauth2.service_account import Credentials
+from datetime import datetime, date
+import json, os, glob, time
 
-# session state
-if "produccion_real" not in st.session_state:
-    st.session_state.produccion_real = {}
-if "sheets_cargado" not in st.session_state:
-    st.session_state.sheets_cargado = False
-if "registro_count" not in st.session_state:
-    st.session_state.registro_count = 0
-
+# ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Control de Producción",
-    page_icon="🏭",
+    page_title="Pateadas — Pendientes Históricos",
+    page_icon="⚠️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ── CSS ───────────────────────────────────────────────────────────────────────
+# ── CSS (mismo estilo que app principal) ──────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 .main-header {
-    background: linear-gradient(135deg, #0e7490 0%, #0891b2 50%, #06b6d4 100%);
-    padding: 2rem 2.5rem; border-radius: 16px; margin-bottom: 1.5rem;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+    background: linear-gradient(135deg, #7f1d1d 0%, #b91c1c 50%, #dc2626 100%);
+    padding: 1.6rem 2.5rem; border-radius: 16px; margin-bottom: 1.5rem;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
 }
 .main-header h1 { color: #fff; font-size: 2rem; font-weight: 700; margin: 0; }
-.main-header p  { color: #e0f7fa; margin: 0.3rem 0 0; font-size: 0.95rem; }
+.main-header p  { color: #fecaca; margin: 0.3rem 0 0; font-size: 0.95rem; }
 .kpi-card {
-    background: #e0f7fa; border: 1px solid #b2ebf2; border-radius: 12px;
-    padding: 1.2rem 1.4rem; text-align: center;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+    background: #fff5f5; border: 1px solid #fecaca; border-radius: 12px;
+    padding: 1.1rem 1.2rem; text-align: center;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.07);
 }
-.kpi-label { color: #0e7490; font-size: 0.78rem; font-weight: 500;
+.kpi-label { color: #991b1b; font-size: 0.76rem; font-weight: 500;
              text-transform: uppercase; letter-spacing: 0.06em; }
-.kpi-value { font-size: 2rem; font-weight: 700; margin: 0.2rem 0 0; }
-.kpi-blue   { color: #0369a1; }
-.kpi-green  { color: #0e7490; }
-.kpi-orange { color: #b45309; }
+.kpi-value { font-size: 1.9rem; font-weight: 700; margin: 0.2rem 0 0; }
 .kpi-red    { color: #b91c1c; }
-.kpi-white  { color: #164e63; }
+.kpi-orange { color: #b45309; }
+.kpi-green  { color: #0e7490; }
 .section-title {
-    font-size: 1.1rem; font-weight: 600; color: #c8d8e8;
-    border-left: 4px solid #06b6d4; padding-left: 0.8rem;
+    font-size: 1.05rem; font-weight: 600; color: #c8d8e8;
+    border-left: 4px solid #dc2626; padding-left: 0.8rem;
     margin: 1.5rem 0 1rem;
 }
-.stDataFrame { border-radius: 10px; overflow: hidden; }
+.prod-card {
+    background: #fff5f5; border: 1px solid #fecaca; border-radius: 10px;
+    padding: 0.75rem 1.1rem; margin-bottom: 0.6rem;
+    border-left: 4px solid #b91c1c;
+}
+.prod-card-done {
+    background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px;
+    padding: 0.75rem 1.1rem; margin-bottom: 0.6rem;
+    border-left: 4px solid #16a34a; opacity: 0.6;
+}
+.badge-fifo {
+    background: #b91c1c; color: #fff; font-size: 0.70rem;
+    padding: 2px 10px; border-radius: 12px; font-weight: 700;
+}
+.badge-queue {
+    background: #e0f7fa; color: #0e7490; font-size: 0.70rem;
+    padding: 2px 10px; border-radius: 12px;
+}
 .stButton > button {
     border-radius: 8px; font-weight: 600; transition: all 0.2s;
-    border: 1px solid #0891b2;
+    border: 1px solid #b91c1c;
 }
-.stButton > button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(8,145,178,0.3); }
-[data-testid="stSidebar"] { background: #f0f9ff; }
-[data-testid="stSidebar"] .stMarkdown { color: #164e63; }
-[data-testid="stMetricValue"] { color: #0369a1; font-size: 1.6rem !important; }
-.stNumberInput input { border-radius: 8px; }
-div[data-testid="stExpander"] { background:#ffffff; border:1px solid #b2ebf2; border-radius:10px; }
+[data-testid="stSidebar"] { background: #fff5f5; }
+[data-testid="stMetricValue"] { color: #b91c1c; font-size: 1.5rem !important; }
+div[data-testid="stExpander"] { background:#ffffff; border:1px solid #fecaca; border-radius:10px; }
 div[data-testid="stExpander"] p,
 div[data-testid="stExpander"] label,
 div[data-testid="stExpander"] span { color: #1a1a2e !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── GOOGLE SHEETS ─────────────────────────────────────────────────────────────
-SHEET_ID = "1NduVjrPt8QgoP7GhTMGlNCwdtd2uiuLfS6s9iwkpLGw"
-SCOPES   = ["https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive"]
+# ── SESSION STATE ─────────────────────────────────────────────────────────────
+if "produccion_real_p" not in st.session_state:
+    st.session_state.produccion_real_p = {}
+if "pateadas_loaded" not in st.session_state:
+    st.session_state.pateadas_loaded = False
+if "reg_count_p" not in st.session_state:
+    st.session_state.reg_count_p = 0
 
-@st.cache_resource
-def get_gsheet_client():
-    creds_dict = dict(st.secrets["gcp_service_account"])
-    creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-    return gspread.authorize(creds)
+# ── RUTAS ─────────────────────────────────────────────────────────────────────
+BASE_DIR         = r"C:\Users\sergioruiz\Reportes\produccion"
+PRODUCTOS_FILE   = os.path.join(BASE_DIR, "maestro_productos.xlsx")
+PROGRAMACION_DIR = os.path.join(BASE_DIR, "programacion")
+PRODUCCION_FILE  = os.path.join(BASE_DIR, "produccion_real.json")
 
-@st.cache_resource
-def get_spreadsheet():
-    return get_gsheet_client().open_by_key(SHEET_ID)
+# ── SIDEBAR ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### ⚙️ Configuración")
+    base_dir_p    = st.text_input("📁 Carpeta base", value=BASE_DIR, key="base_p")
+    productos_path = os.path.join(base_dir_p, "maestro_productos.xlsx")
+    prog_dir       = os.path.join(base_dir_p, "programacion")
+    prod_file      = os.path.join(base_dir_p, "produccion_real.json")
 
-@st.cache_data(ttl=120)
-def cargar_productos_gsheet() -> pd.DataFrame:
-    sh  = get_spreadsheet()
-    ws  = sh.worksheet("PRODUCTOS")
-    data = ws.get_all_records()
-    df = pd.DataFrame(data)
-    if df.empty:
-        return pd.DataFrame(columns=["CODIGO","PRODUCTO","LINEA"])
+    st.markdown("---")
+    if st.button("🔃 Recargar datos", use_container_width=True):
+        st.session_state.pateadas_loaded = False
+        st.rerun()
+
+    st.markdown("---")
+    st.page_link("app.py", label="← Volver al Control de Producción", icon="🏭")
+    st.markdown("---")
+    st.caption("⚠️ **Pateadas — Pendientes Históricos**")
+
+# ── FUNCIONES ─────────────────────────────────────────────────────────────────
+@st.cache_data(ttl=60)
+def cargar_productos_p(path: str) -> pd.DataFrame:
+    df = pd.read_excel(path, dtype=str)
+    df.columns = [c.strip() for c in df.columns]
     rename = {}
     for c in df.columns:
         if c in ("CÓDIGO","CODIGO"):  rename[c] = "CODIGO"
         if c in ("LÍNEA","LINEA"):    rename[c] = "LINEA"
         if c == "PRODUCTO":           rename[c] = "PRODUCTO"
     df = df.rename(columns=rename)
-    return df[["CODIGO","PRODUCTO","LINEA"]].drop_duplicates(subset="CODIGO").astype(str)
+    return df[["CODIGO","PRODUCTO","LINEA"]].drop_duplicates(subset="CODIGO")
 
-@st.cache_data(ttl=120)
-def cargar_programacion_gsheet() -> pd.DataFrame:
-    sh   = get_spreadsheet()
-    ws   = sh.worksheet("PROGRAMACION")
-    data = ws.get_all_records()
-    df   = pd.DataFrame(data)
-    if df.empty:
+@st.cache_data(ttl=60)
+def cargar_programacion_p(carpeta: str) -> pd.DataFrame:
+    archivos = sorted(glob.glob(os.path.join(carpeta, "????????.xlsx")))
+    if not archivos:
         return pd.DataFrame()
-    df.columns = [c.strip() for c in df.columns]
-    if "Cod Item" in df.columns:
-        df["Cod Item"] = df["Cod Item"].astype(str)
-    if "Fecha de Vencimiento" in df.columns:
-        df["Fecha de Vencimiento"] = pd.to_datetime(df["Fecha de Vencimiento"], errors="coerce")
-    return df
+    frames = []
+    for arch in archivos:
+        nombre = os.path.basename(arch).replace(".xlsx","")
+        try:
+            df = pd.read_excel(arch, dtype={"Cod Item": str, "Nro Documento": str})
+            df.columns = [c.strip() for c in df.columns]
+            if "Fecha de Vencimiento" not in df.columns:
+                df["Fecha de Vencimiento"] = pd.to_datetime(nombre, format="%Y%m%d", errors="coerce")
+            else:
+                df["Fecha de Vencimiento"] = pd.to_datetime(df["Fecha de Vencimiento"], errors="coerce")
+                if df["Fecha de Vencimiento"].isna().all():
+                    df["Fecha de Vencimiento"] = pd.to_datetime(nombre, format="%Y%m%d", errors="coerce")
+            df["_archivo"] = nombre
+            frames.append(df)
+        except Exception:
+            pass
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
-def cargar_produccion_gsheet() -> dict:
-    sh   = get_spreadsheet()
-    ws   = sh.worksheet("PRODUCCION_REAL")
-    data = ws.get_all_records()
-    result = {}
-    for row in data:
-        k = row.get("key","")
-        if k:
-            result[k] = {
-                "batch_real": int(row.get("batch_real", 0)),
-                "cant_real":  float(row.get("cant_real", 0.0)),
-                "timestamp":  row.get("timestamp",""),
-                "codigo":     row.get("codigo",""),
-                "producto":   row.get("producto",""),
-                "fecha":      row.get("fecha",""),
-            }
-    return result
+def cargar_produccion_p(path: str) -> dict:
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            return json.load(f)
+    return {}
 
-def guardar_produccion_gsheet(key: str, datos: dict):
-    # 1. Actualizar session_state inmediatamente
-    st.session_state.produccion_real[key] = datos
-
-    # 2. Guardar en Google Sheets
+def guardar_produccion_p(prod_file: str, key: str, datos: dict):
+    st.session_state.produccion_real_p[key] = datos
     try:
-        sh  = get_spreadsheet()
-        ws  = sh.worksheet("PRODUCCION_REAL")
-        st.info(f"🔍 DEBUG: Conectado a sheet. Worksheet: {ws.title}, filas: {ws.row_count}")
-
-        fila = [
-            key,
-            datos.get("batch_real", 0),
-            datos.get("cant_real", 0.0),
-            datos.get("timestamp",""),
-            datos.get("codigo",""),
-            datos.get("producto",""),
-            datos.get("fecha",""),
-        ]
-        st.info(f"🔍 DEBUG: Fila a guardar: {fila}")
-
-        todos = ws.get_all_values()
-        st.info(f"🔍 DEBUG: Valores actuales en sheet: {len(todos)} filas")
-
-        # Si está vacía o no tiene encabezado, crearlo
-        if not todos or todos[0][0] != "key":
-            ws.clear()
-            ws.append_row(["key","batch_real","cant_real","timestamp","codigo","producto","fecha"])
-            todos = [["key","batch_real","cant_real","timestamp","codigo","producto","fecha"]]
-            st.info("🔍 DEBUG: Encabezado creado")
-
-        # Buscar si ya existe el key para actualizar, o agregar nueva fila
-        row_num = None
-        for i, r in enumerate(todos):
-            if len(r) > 0 and r[0] == key:
-                row_num = i + 1
-                break
-
-        if row_num:
-            ws.update(f"A{row_num}:G{row_num}", [fila])
-            st.info(f"🔍 DEBUG: Actualizado en fila {row_num}")
-        else:
-            ws.append_row(fila)
-            st.info(f"🔍 DEBUG: Nueva fila agregada")
-
-        st.success("✅ Guardado en Google Sheets correctamente")
-
+        os.makedirs(os.path.dirname(prod_file), exist_ok=True)
+        with open(prod_file, "w") as f:
+            json.dump(st.session_state.produccion_real_p, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        import traceback
-        st.error(f"❌ Error al guardar en Google Sheets: {e}")
-        st.code(traceback.format_exc())
-
-def init_hoja_produccion():
-    """Crea encabezado en PRODUCCION_REAL si está vacía."""
-    try:
-        sh = get_spreadsheet()
-        ws = sh.worksheet("PRODUCCION_REAL")
-        valores = ws.get_all_values()
-        if not valores or valores[0][0] != "key":
-            ws.clear()
-            ws.append_row(["key","batch_real","cant_real","timestamp","codigo","producto","fecha"])
-    except Exception as e:
-        st.warning(f"⚠️ No se pudo inicializar PRODUCCION_REAL: {e}")
+        st.warning(f"⚠️ Error guardando: {e}")
 
 def key_reg(fecha_str: str, codigo: str) -> str:
     return f"{fecha_str}||{codigo}"
 
-def fmt_fecha(d) -> str:
-    s = d.strftime("%d/%m/%Y (%A)")
-    for en, es in [("Monday","Lunes"),("Tuesday","Martes"),("Wednesday","Miércoles"),
-                   ("Thursday","Jueves"),("Friday","Viernes"),("Saturday","Sábado"),("Sunday","Domingo")]:
-        s = s.replace(en, es)
-    return s
+# ── VALIDAR Y CARGAR ARCHIVOS ─────────────────────────────────────────────────
+errores = []
+if not os.path.exists(productos_path):
+    errores.append(f"❌ No se encuentra `maestro_productos.xlsx` en: `{base_dir_p}`")
+if not os.path.exists(prog_dir):
+    errores.append(f"❌ No se encuentra la carpeta `programacion/` en: `{base_dir_p}`")
 
-# ── SIDEBAR ───────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### 📂 Actualizar Datos")
+if errores:
+    for e in errores:
+        st.error(e)
+    st.stop()
 
-    st.markdown("**📦 Subir Maestro de Productos**")
-    st.caption("Solo cuando agregues o cambies productos.")
-    f_prod = st.file_uploader("", type=["xlsx"], key="up_prod", label_visibility="collapsed")
-    if f_prod:
-        with st.spinner("Subiendo a Google Sheets..."):
-            try:
-                df_up = pd.read_excel(io.BytesIO(f_prod.read()), dtype=str)
-                df_up.columns = [c.strip() for c in df_up.columns]
-                sh = get_spreadsheet()
-                ws = sh.worksheet("PRODUCTOS")
-                ws.clear()
-                ws.append_row(df_up.columns.tolist())
-                ws.append_rows(df_up.fillna("").values.tolist())
-                cargar_productos_gsheet.clear()
-                st.success(f"✅ {len(df_up)} productos actualizados")
-            except Exception as e:
-                st.error(f"❌ {e}")
+try:
+    df_productos    = cargar_productos_p(productos_path)
+    df_programacion = cargar_programacion_p(prog_dir)
+except Exception as e:
+    st.error(f"❌ Error al leer archivos: {e}")
+    st.stop()
 
-    st.markdown("---")
-    st.markdown("**📅 Subir Programación Diaria**")
-    st.caption("Sube uno o varios `YYYYMMDD.xlsx`. Se **agregan** a los existentes.")
-    f_prog = st.file_uploader("", type=["xlsx"], accept_multiple_files=True,
-                               key="up_prog", label_visibility="collapsed")
-    if f_prog:
-        with st.spinner("Subiendo programación..."):
-            try:
-                frames = []
-                for f in f_prog:
-                    df_dia = pd.read_excel(io.BytesIO(f.read()),
-                                           dtype={"Cod Item": str, "Nro Documento": str})
-                    df_dia.columns = [c.strip() for c in df_dia.columns]
-                    nombre = f.name.replace(".xlsx","")
-                    if "Fecha de Vencimiento" not in df_dia.columns or df_dia["Fecha de Vencimiento"].isna().all():
-                        df_dia["Fecha de Vencimiento"] = pd.to_datetime(nombre, format="%Y%m%d", errors="coerce")
-                    frames.append(df_dia)
+if df_programacion.empty:
+    st.warning("⚠️ No se pudo leer ningún archivo de programación.")
+    st.stop()
 
-                sh  = get_spreadsheet()
-                ws  = sh.worksheet("PROGRAMACION")
-                # Leer existente y concatenar
-                existing = ws.get_all_records()
-                df_exist = pd.DataFrame(existing) if existing else pd.DataFrame()
-                df_new   = pd.concat(frames, ignore_index=True)
-                df_new["Fecha de Vencimiento"] = pd.to_datetime(
-                    df_new["Fecha de Vencimiento"], errors="coerce").dt.strftime("%Y-%m-%d")
+if not st.session_state.pateadas_loaded:
+    st.session_state.produccion_real_p = cargar_produccion_p(prod_file)
+    st.session_state.pateadas_loaded   = True
 
-                if not df_exist.empty:
-                    # Eliminar duplicados por Nro Documento
-                    df_exist["Nro Documento"] = df_exist["Nro Documento"].astype(str)
-                    df_new["Nro Documento"]   = df_new["Nro Documento"].astype(str)
-                    df_combined = pd.concat([df_exist, df_new], ignore_index=True)
-                    df_combined = df_combined.drop_duplicates(subset=["Nro Documento"], keep="last")
-                else:
-                    df_combined = df_new
+produccion_real = st.session_state.produccion_real_p
+hoy = date.today()
 
-                ws.clear()
-                ws.append_row(df_combined.columns.tolist())
-                ws.append_rows(df_combined.fillna("").astype(str).values.tolist())
-                cargar_programacion_gsheet.clear()
-                st.success(f"✅ Programación actualizada — {len(df_combined)} registros totales")
-            except Exception as e:
-                st.error(f"❌ {e}")
+# ── CONSTRUIR RESUMEN HISTÓRICO (solo fechas < hoy) ───────────────────────────
+df_hist = df_programacion[df_programacion["Cod Item"].isin(df_productos["CODIGO"])].copy()
+df_hist = df_hist.merge(df_productos[["CODIGO","PRODUCTO","LINEA"]],
+                        left_on="Cod Item", right_on="CODIGO", how="left")
+df_hist["fecha_date"] = df_hist["Fecha de Vencimiento"].dt.date
+df_hist["fecha_str"]  = df_hist["Fecha de Vencimiento"].dt.strftime("%Y-%m-%d")
 
-    st.markdown("---")
-    if st.button("🔃 Recargar datos", use_container_width=True):
-        cargar_productos_gsheet.clear()
-        cargar_programacion_gsheet.clear()
-        st.session_state.produccion_real = cargar_produccion_gsheet()
-        st.session_state.sheets_cargado  = True
-        st.rerun()
+# ─ SOLO fechas ANTERIORES a hoy ──────────────────────────────────────────────
+df_hist = df_hist[df_hist["fecha_date"] < hoy]
 
-    st.markdown("---")
-    st.caption("🏭 **Control de Producción v5.0**\nGoogle Sheets · Datos persistentes")
+resumen = df_hist.groupby(["CODIGO","PRODUCTO","LINEA","fecha_str"]).agg(
+    BATCH_PLAN=("Nro Documento","count"),
+    CANT_PLAN=("Cantidad Planificada","sum")
+).reset_index().sort_values(["CODIGO","fecha_str"])
+
+resumen["CANT_PLAN"] = pd.to_numeric(resumen["CANT_PLAN"], errors="coerce").fillna(0)
+
+def get_real(codigo, fecha):
+    r = produccion_real.get(key_reg(fecha, codigo), {})
+    return r.get("batch_real", 0), r.get("cant_real", 0.0)
+
+resumen[["BATCH_REAL","CANT_REAL"]] = resumen.apply(
+    lambda r: pd.Series(get_real(r["CODIGO"], r["fecha_str"])), axis=1)
+resumen["BATCH_PEND"] = (resumen["BATCH_PLAN"] - resumen["BATCH_REAL"]).clip(lower=0).astype(int)
+resumen["CANT_PEND"]  = (resumen["CANT_PLAN"]  - resumen["CANT_REAL"]).clip(lower=0).round(2)
+
+# Solo los que tienen batch pendiente
+pateadas = resumen[resumen["BATCH_PEND"] > 0].copy()
 
 # ── HEADER ────────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div class="main-header">
-  <div style="display:flex;align-items:center;gap:1.5rem;">
-    <img src="data:image/jpeg;base64,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"
-         style="height:80px;width:80px;object-fit:contain;border-radius:10px;background:#fff;padding:6px;">
+  <div style="display:flex;align-items:center;gap:1.2rem;">
+    <span style="font-size:3rem;">⚠️</span>
     <div>
-      <h1 style="font-size:2.6rem;margin:0;">Control de Producción</h1>
-      <p style="margin:0.3rem 0 0;">Seguimiento en tiempo real · Datos persistentes en Google Sheets</p>
+      <h1 style="font-size:2.2rem;margin:0;">Pateadas — Pendientes Históricos</h1>
+      <p style="margin:0.3rem 0 0;">
+        Solo fechas anteriores a hoy ({hoy.strftime('%d/%m/%Y')}) · Orden FIFO
+      </p>
     </div>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ── CARGAR DATOS ──────────────────────────────────────────────────────────────
-try:
-    init_hoja_produccion()
-    with st.spinner("Cargando datos..."):
-        df_productos    = cargar_productos_gsheet()
-        df_programacion = cargar_programacion_gsheet()
-        # Solo cargar desde Sheets la primera vez que abre la sesión
-        if not st.session_state.sheets_cargado:
-            st.session_state.produccion_real = cargar_produccion_gsheet()
-            st.session_state.sheets_cargado  = True
-except Exception as e:
-    st.error(f"❌ Error conectando con Google Sheets: {e}")
-    st.info("Verifica que los secrets de Streamlit estén configurados correctamente.")
-    st.stop()
-
-# Fuente de verdad: siempre session_state (se actualiza al guardar)
-produccion_real = st.session_state.produccion_real
-
-if df_productos.empty:
-    st.warning("⚠️ No hay productos cargados. Sube el `maestro_productos.xlsx` desde la barra lateral.")
-    st.stop()
-
-if df_programacion.empty:
-    st.warning("⚠️ No hay programación cargada. Sube un archivo `YYYYMMDD.xlsx` desde la barra lateral.")
-    st.stop()
-
-# ── FILTROS ───────────────────────────────────────────────────────────────────
-fechas_disponibles = sorted(
-    df_programacion["Fecha de Vencimiento"].dropna().dt.date.unique(), reverse=True
-)
-
-col_f, col_l = st.columns([2, 2])
-with col_f:
-    fecha_sel = st.selectbox("📅 Fecha de Programación", options=fechas_disponibles,
-                             format_func=fmt_fecha, index=0)
-with col_l:
-    lineas_disponibles = sorted(df_productos["LINEA"].dropna().unique().tolist())
-    linea_sel = st.selectbox("🏭 Línea de Producción", ["— Todas las líneas —"] + lineas_disponibles)
-
-fecha_str = fecha_sel.strftime("%Y-%m-%d")
-buscar    = st.text_input("🔍 Buscar producto", placeholder="Código o nombre...")
-
-# ── CRUCE DE DATOS ────────────────────────────────────────────────────────────
-prog_fecha    = df_programacion[df_programacion["Fecha de Vencimiento"].dt.date == fecha_sel]
-prog_filtrado = prog_fecha[prog_fecha["Cod Item"].isin(df_productos["CODIGO"])]
-
-resumen_prog = prog_filtrado.groupby("Cod Item").agg(
-    BATCH_PLAN=("Nro Documento", "count"),
-    CANT_PLAN=("Cantidad Planificada", "sum")
-).reset_index()
-
-df_base = df_productos[["CODIGO","PRODUCTO","LINEA"]].copy()
-if linea_sel != "— Todas las líneas —":
-    df_base = df_base[df_base["LINEA"] == linea_sel]
-df_base = df_base.merge(resumen_prog, left_on="CODIGO", right_on="Cod Item", how="left")
-df_base["BATCH_PLAN"] = df_base["BATCH_PLAN"].fillna(0).astype(int)
-df_base["CANT_PLAN"]  = pd.to_numeric(df_base["CANT_PLAN"], errors="coerce").fillna(0).round(2)
-df_base = df_base.reset_index(drop=True)
-
-if buscar.strip():
-    mask = (df_base["CODIGO"].str.contains(buscar, case=False, na=False) |
-            df_base["PRODUCTO"].str.contains(buscar, case=False, na=False))
-    df_base = df_base[mask].reset_index(drop=True)
-
-# ── KPIs ──────────────────────────────────────────────────────────────────────
-total_prods   = len(df_base)
-con_prog      = int((df_base["BATCH_PLAN"] > 0).sum())
-total_batch   = int(df_base["BATCH_PLAN"].sum())
-total_cant    = float(df_base["CANT_PLAN"].sum())
-dias_cargados = int(df_programacion["Fecha de Vencimiento"].dropna().dt.date.nunique())
-
-batch_prod_total = 0
-cant_prod_total  = 0.0
-for _, row in df_base.iterrows():
-    k = key_reg(fecha_str, row["CODIGO"])
-    if k in produccion_real:
-        batch_prod_total += produccion_real[k].get("batch_real", 0)
-        cant_prod_total  += produccion_real[k].get("cant_real", 0.0)
-
-pct_batch = (batch_prod_total / total_batch * 100) if total_batch > 0 else 0
-
-c1, c2, c3, c4, c5, c6 = st.columns(6)
+# ── KPIs GENERALES ────────────────────────────────────────────────────────────
+k1, k2, k3, k4 = st.columns(4)
 for col, lbl, val, cls in [
-    (c1, "📅 Días Cargados",     str(dias_cargados),                        "kpi-white"),
-    (c2, "✅ Con Programación",  str(con_prog),                             "kpi-blue"),
-    (c3, "🔢 BATCH Plan",        str(total_batch),                          "kpi-blue"),
-    (c4, "⚖️ Cantidad Plan",    f"{total_cant:,.1f}",                      "kpi-blue"),
-    (c5, "🟢 BATCH Producido",   f"{batch_prod_total} ({pct_batch:.0f}%)",  "kpi-green"),
-    (c6, "📊 Cant. Producida",   f"{cant_prod_total:,.1f}",                 "kpi-green"),
+    (k1, "🔴 Productos con Pateadas", str(pateadas["CODIGO"].nunique()),               "kpi-red"),
+    (k2, "📅 Fechas Afectadas",       str(pateadas["fecha_str"].nunique()),             "kpi-orange"),
+    (k3, "🔢 BATCH Pendientes Total", str(int(pateadas["BATCH_PEND"].sum())),           "kpi-orange"),
+    (k4, "⚖️ Cant. Pendiente Total", f"{float(pateadas['CANT_PEND'].sum()):,.1f}",    "kpi-orange"),
 ]:
     with col:
         st.markdown(f'<div class="kpi-card"><div class="kpi-label">{lbl}</div>'
                     f'<div class="kpi-value {cls}">{val}</div></div>', unsafe_allow_html=True)
 
-st.markdown("")
+st.markdown("<br>", unsafe_allow_html=True)
 
-if total_batch > 0:
-    color = "#0e7490" if pct_batch >= 80 else "#b45309" if pct_batch >= 40 else "#b91c1c"
+if pateadas.empty:
+    st.success("🎉 ¡Sin pateadas! Todos los BATCH de fechas anteriores están declarados.")
+    st.stop()
+
+# ── FILTRO POR LÍNEA ──────────────────────────────────────────────────────────
+st.markdown('<div class="section-title">🏭 Selecciona una Línea de Producción</div>',
+            unsafe_allow_html=True)
+
+lineas_con_pateadas = sorted(pateadas["LINEA"].dropna().unique().tolist())
+
+col_lin, col_info = st.columns([2, 2])
+with col_lin:
+    linea_sel = st.selectbox(
+        "Línea",
+        options=["— Selecciona una línea —"] + lineas_con_pateadas,
+        key="linea_pateadas"
+    )
+
+if linea_sel == "— Selecciona una línea —":
+    # Mostrar resumen por línea mientras no se haya elegido
+    st.markdown('<div class="section-title">📊 Resumen de Pateadas por Línea</div>',
+                unsafe_allow_html=True)
+    rows_lin = []
+    for ln in lineas_con_pateadas:
+        sub = pateadas[pateadas["LINEA"] == ln]
+        rows_lin.append({
+            "Línea": ln,
+            "Productos": sub["CODIGO"].nunique(),
+            "Fechas afectadas": sub["fecha_str"].nunique(),
+            "BATCH Pendientes": int(sub["BATCH_PEND"].sum()),
+            "Cant. Pendiente": round(float(sub["CANT_PEND"].sum()), 2),
+        })
+    df_lin = pd.DataFrame(rows_lin)
+    st.dataframe(
+        df_lin.style
+        .format({"Cant. Pendiente": "{:,.2f}"})
+        .hide(axis="index"),
+        use_container_width=True, height=400
+    )
+    st.info("👆 Selecciona una línea arriba para ver el detalle de productos y declarar producción.")
+    st.stop()
+
+# ── DETALLE POR LÍNEA SELECCIONADA ────────────────────────────────────────────
+pateadas_linea = pateadas[pateadas["LINEA"] == linea_sel].copy()
+
+with col_info:
+    n_prods  = pateadas_linea["CODIGO"].nunique()
+    n_fechas = pateadas_linea["fecha_str"].nunique()
+    n_batch  = int(pateadas_linea["BATCH_PEND"].sum())
     st.markdown(f"""
-    <div style="background:#e0f7fa;border:1px solid #b2ebf2;border-radius:10px;
-                padding:1rem 1.2rem;margin-bottom:1rem;">
-      <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-        <span style="color:#164e63;font-weight:600;font-size:0.9rem;">
-          📈 Avance del día — {fecha_sel.strftime('%d/%m/%Y')}</span>
-        <span style="color:{color};font-weight:700;">{pct_batch:.1f}% completado</span>
-      </div>
-      <div style="background:#b2ebf2;border-radius:6px;height:14px;overflow:hidden;">
-        <div style="width:{min(pct_batch,100):.1f}%;height:100%;background:{color};border-radius:6px;"></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;margin-top:5px;font-size:0.78rem;color:#0e7490;">
-        <span>BATCH: {batch_prod_total} producidos / {total_batch} planificados</span>
-        <span>Pendiente: {total_batch - batch_prod_total} BATCH · {max(total_cant - cant_prod_total,0):,.1f} unid.</span>
-      </div>
+    <div style="background:#fff5f5;border:1px solid #fecaca;border-radius:10px;
+                padding:0.9rem 1.2rem;margin-top:1.6rem;">
+      <span style="color:#991b1b;font-size:0.82rem;font-weight:500;">LÍNEA: </span>
+      <span style="color:#1a1a2e;font-weight:700;">{linea_sel}</span>
+      &nbsp;&nbsp;
+      <span style="color:#991b1b;font-size:0.82rem;">Productos: </span>
+      <span style="color:#b91c1c;font-weight:700;">{n_prods}</span>
+      &nbsp;&nbsp;
+      <span style="color:#991b1b;font-size:0.82rem;">Fechas: </span>
+      <span style="color:#b91c1c;font-weight:700;">{n_fechas}</span>
+      &nbsp;&nbsp;
+      <span style="color:#991b1b;font-size:0.82rem;">BATCH Pend.: </span>
+      <span style="color:#b91c1c;font-weight:700;">{n_batch}</span>
     </div>
     """, unsafe_allow_html=True)
 
-# ── TABS ──────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📋 Tablero de Control",
-    "✍️ Registro de Producción",
-    "📊 Resumen por Línea",
-    "⚠️ Ver Pateadas"
-])
+st.markdown('<div class="section-title">📦 Productos con Pateadas — Declara en orden FIFO ↓ (más antiguo primero)</div>',
+            unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — TABLERO
-# ══════════════════════════════════════════════════════════════════════════════
-with tab1:
-    st.markdown('<div class="section-title">Detalle de Productos — Estado de Producción</div>',
-                unsafe_allow_html=True)
-    filas = []
-    for _, row in df_base.iterrows():
-        k    = key_reg(fecha_str, row["CODIGO"])
-        real = produccion_real.get(k, {})
-        bp, cp = int(row["BATCH_PLAN"]), float(row["CANT_PLAN"])
-        br = real.get("batch_real", 0)
-        cr = real.get("cant_real", 0.0)
-        pend_b = max(bp - br, 0)
-        pend_c = max(cp - cr, 0)
-        pct    = round(br / bp * 100, 1) if bp > 0 else 0.0
-        if bp == 0:       estado = "Sin programación"
-        elif br == 0:     estado = "Pendiente"
-        elif pend_b == 0: estado = "Completado"
-        else:             estado = "En proceso"
-        filas.append({
-            "CÓDIGO": row["CODIGO"], "PRODUCTO": row["PRODUCTO"], "LÍNEA": row["LINEA"],
-            "BATCH Plan": bp, "Cant. Plan": round(cp,2),
-            "BATCH Real": br, "Cant. Real": round(cr,2),
-            "BATCH Pend.": pend_b, "Cant. Pend.": round(pend_c,2),
-            "Avance %": pct, "Estado": estado,
-        })
-    df_tabla = pd.DataFrame(filas)
+# Agrupar por producto, luego por fecha (más antigua → más nueva)
+productos_unicos = (pateadas_linea[["CODIGO","PRODUCTO"]]
+                    .drop_duplicates()
+                    .sort_values("PRODUCTO")
+                    .reset_index(drop=True))
 
-    estados_fil = st.multiselect(
-        "Filtrar por estado:",
-        ["Sin programación","Pendiente","En proceso","Completado"],
-        default=["Pendiente","En proceso","Completado"],
-    )
-    if estados_fil:
-        df_tabla = df_tabla[df_tabla["Estado"].isin(estados_fil)]
+for _, prod_row in productos_unicos.iterrows():
+    codigo   = prod_row["CODIGO"]
+    producto = prod_row["PRODUCTO"]
 
-    def color_estado(val):
-        return {"Completado":"background-color:#0d2a1a;color:#4ecf8c;font-weight:600",
-                "En proceso":"background-color:#2a1f0a;color:#ffaa44;font-weight:600",
-                "Pendiente":"background-color:#2a1010;color:#ff8080;font-weight:600",
-                "Sin programación":"background-color:#12192a;color:#5a7090"}.get(val,"")
+    fechas_prod = (pateadas_linea[pateadas_linea["CODIGO"] == codigo]
+                   .sort_values("fecha_str")
+                   .reset_index(drop=True))
 
-    def color_avance(val):
-        if val >= 100: return "color:#0e7490;font-weight:700"
-        if val >= 50:  return "color:#b45309;font-weight:600"
-        if val > 0:    return "color:#b45309"
-        return "color:#5a7090"
+    total_batch_pend = int(fechas_prod["BATCH_PEND"].sum())
+    total_cant_pend  = float(fechas_prod["CANT_PEND"].sum())
+    n_fechas_prod    = len(fechas_prod)
 
-    st.dataframe(
-        df_tabla.style.map(color_estado, subset=["Estado"]).map(color_avance, subset=["Avance %"])
-        .format({"Cant. Plan":"{:,.2f}","Cant. Real":"{:,.2f}","Cant. Pend.":"{:,.2f}","Avance %":"{:.1f}%"})
-        .hide(axis="index"),
-        use_container_width=True, height=520
-    )
-    csv = df_tabla.to_csv(index=False).encode("utf-8-sig")
-    st.download_button("⬇️ Exportar CSV", csv, f"produccion_{fecha_str}.csv", "text/csv")
+    titulo_exp = (f"📦 {codigo}  —  {producto[:55]}{'...' if len(producto)>55 else ''}"
+                  f"   🔴 {total_batch_pend} BATCH pendientes en {n_fechas_prod} fecha(s)")
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — REGISTRO DE PRODUCCIÓN
-# ══════════════════════════════════════════════════════════════════════════════
-with tab2:
-    st.markdown('<div class="section-title">Ingreso de Producción Real por Operario</div>',
-                unsafe_allow_html=True)
-    df_con_prog = df_base[df_base["BATCH_PLAN"] > 0].copy().reset_index(drop=True)
+    with st.expander(titulo_exp, expanded=False):
+        # Info del producto
+        st.markdown(f"""
+        <div style="background:#fff5f5;border-radius:8px;padding:0.6rem 1rem;
+                    margin-bottom:1rem;border-left:3px solid #b91c1c;font-size:0.85rem;">
+          <span style="color:#555;">CÓDIGO: </span>
+          <span style="color:#1a1a2e;font-weight:600;">{codigo}</span>
+          &nbsp;&nbsp;&nbsp;
+          <span style="color:#555;">LÍNEA: </span>
+          <span style="color:#1a1a2e;font-weight:600;">{linea_sel}</span>
+          &nbsp;&nbsp;&nbsp;
+          <span style="color:#555;">BATCH Pend. Total: </span>
+          <span style="color:#b91c1c;font-weight:700;">{total_batch_pend}</span>
+          &nbsp;&nbsp;&nbsp;
+          <span style="color:#555;">Cant. Pend. Total: </span>
+          <span style="color:#b91c1c;font-weight:700;">{total_cant_pend:,.2f}</span>
+        </div>
+        """, unsafe_allow_html=True)
 
-    if df_con_prog.empty:
-        st.info(f"ℹ️ No hay productos programados para el {fecha_sel.strftime('%d/%m/%Y')}.")
-    else:
-        subtitulo = f"**{len(df_con_prog)}** productos para el **{fecha_sel.strftime('%d/%m/%Y')}**"
-        if linea_sel != "— Todas las líneas —":
-            subtitulo += f" — Línea: **{linea_sel}**"
-        st.markdown(subtitulo)
+        st.markdown("**↓ Declara siempre desde la fecha más antigua (FIFO)**")
         st.markdown("")
 
-        for pos, (_, row) in enumerate(df_con_prog.iterrows()):
-            k    = key_reg(fecha_str, row["CODIGO"])
-            ukey = f"{k}||{pos}"
-            real = produccion_real.get(k, {"batch_real": 0, "cant_real": 0.0})
-            bp, cp = int(row["BATCH_PLAN"]), float(row["CANT_PLAN"])
-            br = real.get("batch_real", 0)
-            cr = real.get("cant_real", 0.0)
-            pend_b = max(bp - br, 0)
-            pend_c = max(cp - cr, 0)
-            pct    = (br / bp * 100) if bp > 0 else 0
+        for fpos, (_, frow) in enumerate(fechas_prod.iterrows()):
+            f_str    = frow["fecha_str"]
+            f_disp   = datetime.strptime(f_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+            bp_f     = int(frow["BATCH_PLAN"])
+            cp_f     = float(frow["CANT_PLAN"])
+            br_f     = int(frow["BATCH_REAL"])
+            cr_f     = float(frow["CANT_REAL"])
+            pend_b_f = int(frow["BATCH_PEND"])
+            pend_c_f = float(frow["CANT_PEND"])
+            k_f      = key_reg(f_str, codigo)
+            ukey_f   = f"pat_{codigo}_{f_str}_{fpos}"
 
-            if br == 0:       hcolor, estado_txt = "#b91c1c", "🔴 Pendiente"
-            elif pend_b == 0: hcolor, estado_txt = "#0e7490", "🟢 Completado"
-            else:             hcolor, estado_txt = "#b45309", "🟡 En proceso"
+            badge = (
+                '<span class="badge-fifo">⬆ DECLARAR PRIMERO</span>'
+                if fpos == 0 else
+                f'<span class="badge-queue">#{fpos+1} en cola</span>'
+            )
 
-            titulo = (f"{row['CODIGO']}  —  {row['PRODUCTO'][:60]}"
-                      f"{'...' if len(row['PRODUCTO'])>60 else ''}   {estado_txt}")
-
-            with st.expander(titulo, expanded=(br > 0 and pend_b > 0)):
-                st.markdown(f"""
-                <div style="background:#f0f9ff;border-radius:8px;padding:0.6rem 1rem;
-                            margin-bottom:0.8rem;border-left:3px solid {hcolor};">
-                  <span style="color:#555;font-size:0.82rem;">LÍNEA: </span>
-                  <span style="color:#1a1a2e;font-size:0.85rem;font-weight:600;">{row['LINEA']}</span>
-                  &nbsp;&nbsp;&nbsp;
-                  <span style="color:#555;font-size:0.82rem;">AVANCE: </span>
-                  <span style="color:{hcolor};font-size:0.85rem;font-weight:700;">{pct:.0f}%</span>
-                  &nbsp;&nbsp;&nbsp;
-                  <span style="color:#555;font-size:0.82rem;">BATCH PLAN: </span>
-                  <span style="color:#1a1a2e;font-size:0.85rem;font-weight:600;">{bp}</span>
-                  &nbsp;&nbsp;&nbsp;
-                  <span style="color:#555;font-size:0.82rem;">CANT. PLAN: </span>
-                  <span style="color:#1a1a2e;font-size:0.85rem;font-weight:600;">{cp:,.2f}</span>
-                </div>
-                """, unsafe_allow_html=True)
-
-                mc1, mc2, mc3, mc4 = st.columns(4)
-                mc1.metric("✅ BATCH Producido", br, delta=f"-{pend_b} pend." if pend_b > 0 else "✓ OK")
-                mc2.metric("📦 Cant. Producida", f"{cr:,.2f}", delta=f"-{pend_c:,.2f} pend." if pend_c > 0 else "✓ OK")
-                mc3.metric("⏳ BATCH Pendiente", pend_b)
-                mc4.metric("⏳ Cant. Pendiente", f"{pend_c:,.2f}")
-
-                # Si ya está completo, bloquear ingreso
-                if pend_b == 0:
-                    st.success(f"✅ Completado — {br} de {bp} BATCH producidos. No hay pendientes.")
-                else:
-                    st.markdown(f"**Ingresa los BATCH que produces ahora** (pendiente: {pend_b} BATCH · {pend_c:,.2f} unid.)")
-                    ci1, ci2, ci3 = st.columns([2, 2, 1])
-                    with ci1:
-                        nuevo_batch = st.number_input(
-                            "BATCH a registrar ahora",
-                            min_value=0, max_value=pend_b,
-                            value=0, step=1,
-                            key=f"batch_{ukey}"
-                        )
-                    with ci2:
-                        nueva_cant = st.number_input(
-                            "Cantidad a registrar ahora",
-                            min_value=0.0, max_value=float(pend_c) if pend_c > 0 else float(cp),
-                            value=0.0, step=0.5, format="%.2f",
-                            key=f"cant_{ukey}"
-                        )
-                    with ci3:
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        if st.button("💾 Registrar", key=f"save_{ukey}_{st.session_state.registro_count}", use_container_width=True):
-                            if nuevo_batch == 0:
-                                st.warning("⚠️ Ingresa al menos 1 BATCH")
-                            else:
-                                # ACUMULAR: sumar al total ya producido
-                                batch_acum = br + nuevo_batch
-                                cant_acum  = cr + nueva_cant
-                                datos = {
-                                    "batch_real": batch_acum,
-                                    "cant_real":  cant_acum,
-                                    "timestamp":  datetime.now().isoformat(),
-                                    "codigo":     row["CODIGO"],
-                                    "producto":   row["PRODUCTO"],
-                                    "fecha":      fecha_str
-                                }
-                                with st.spinner("Guardando..."):
-                                    guardar_produccion_gsheet(k, datos)
-                                st.session_state.registro_count += 1
-                                pend_nuevo = max(bp - batch_acum, 0)
-                                if pend_nuevo == 0:
-                                    st.success(f"✅ ¡Completado! {batch_acum} de {bp} BATCH producidos.")
-                                else:
-                                    st.success(f"✅ Registrado — Total: {batch_acum}/{bp} BATCH · Pendiente: {pend_nuevo} BATCH")
-                                time.sleep(0.5)
-                                st.rerun()
-
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — RESUMEN POR LÍNEA
-# ══════════════════════════════════════════════════════════════════════════════
-with tab3:
-    st.markdown('<div class="section-title">Resumen Consolidado por Línea de Producción</div>',
-                unsafe_allow_html=True)
-    df_todos = df_productos[["CODIGO","PRODUCTO","LINEA"]].copy()
-    df_todos = df_todos.merge(resumen_prog, left_on="CODIGO", right_on="Cod Item", how="left")
-    df_todos["BATCH_PLAN"] = df_todos["BATCH_PLAN"].fillna(0).astype(int)
-    df_todos["CANT_PLAN"]  = pd.to_numeric(df_todos["CANT_PLAN"], errors="coerce").fillna(0).round(2)
-
-    resumen_linea = []
-    for linea in sorted(df_todos["LINEA"].dropna().unique()):
-        sub  = df_todos[df_todos["LINEA"] == linea]
-        bp_l = int(sub["BATCH_PLAN"].sum())
-        cp_l = float(sub["CANT_PLAN"].sum())
-        br_l = sum(produccion_real.get(key_reg(fecha_str, r["CODIGO"]),{}).get("batch_real",0) for _,r in sub.iterrows())
-        cr_l = sum(produccion_real.get(key_reg(fecha_str, r["CODIGO"]),{}).get("cant_real",0.0) for _,r in sub.iterrows())
-        resumen_linea.append({
-            "Línea": linea, "Productos": len(sub), "Con Prog.": int((sub["BATCH_PLAN"]>0).sum()),
-            "BATCH Plan": bp_l, "BATCH Real": br_l, "BATCH Pend.": max(bp_l-br_l,0),
-            "Avance % (BATCH)": round(br_l/bp_l*100,1) if bp_l>0 else 0.0,
-            "Cant. Plan": round(cp_l,2), "Cant. Real": round(cr_l,2),
-            "Variación Cant.": round(cr_l-cp_l,2),
-        })
-
-    df_lineas = pd.DataFrame(resumen_linea)
-
-    def bg_avance(val):
-        if val >= 100: return "background-color:#dcfce7;color:#166534;font-weight:700"
-        if val >= 50:  return "background-color:#fef9c3;color:#854d0e;font-weight:600"
-        if val > 0:    return "background-color:#ffedd5;color:#9a3412;font-weight:600"
-        return "color:#5a7090"
-
-    st.markdown('<div class="section-title">📊 Avance por BATCH — Métrica principal</div>', unsafe_allow_html=True)
-    cols_b = ["Línea","Productos","Con Prog.","BATCH Plan","BATCH Real","BATCH Pend.","Avance % (BATCH)"]
-    st.dataframe(
-        df_lineas[cols_b].style.map(bg_avance, subset=["Avance % (BATCH)"])
-        .format({"Avance % (BATCH)":"{:.1f}%"}).hide(axis="index"),
-        use_container_width=True, height=460
-    )
-
-    df_g = df_lineas[df_lineas["BATCH Plan"]>0].set_index("Línea")[["BATCH Plan","BATCH Real"]]
-    if not df_g.empty:
-        st.markdown('<div class="section-title">BATCH Plan vs Real por Línea</div>', unsafe_allow_html=True)
-        st.bar_chart(df_g, use_container_width=True, height=300)
-
-    st.markdown('<div class="section-title">🔬 Análisis de Cantidades — Referencial</div>', unsafe_allow_html=True)
-
-    def color_var(val):
-        if val > 0: return "color:#0e7490;font-weight:600"
-        if val < 0: return "color:#b91c1c;font-weight:600"
-        return "color:#7a92a8"
-
-    cols_c = ["Línea","Cant. Plan","Cant. Real","Variación Cant."]
-    st.dataframe(
-        df_lineas[cols_c].style.map(color_var, subset=["Variación Cant."])
-        .format({"Cant. Plan":"{:,.2f}","Cant. Real":"{:,.2f}","Variación Cant.":"{:+,.2f}"})
-        .hide(axis="index"),
-        use_container_width=True, height=460
-    )
-
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — PENDIENTES HISTÓRICOS FIFO
-# ══════════════════════════════════════════════════════════════════════════════
-with tab4:
-    st.markdown('<div class="section-title">⚠️ Ver Pateadas — Pendientes por Producto</div>',
-                unsafe_allow_html=True)
-    st.markdown("Selecciona un producto y ve todos sus BATCH pendientes de **más antiguo a más reciente**.")
-
-    df_hist = df_programacion[df_programacion["Cod Item"].isin(df_productos["CODIGO"])].copy()
-    df_hist = df_hist.merge(df_productos[["CODIGO","PRODUCTO","LINEA"]], left_on="Cod Item", right_on="CODIGO", how="left")
-    df_hist["fecha_str"] = df_hist["Fecha de Vencimiento"].dt.strftime("%Y-%m-%d")
-
-    resumen_hist = df_hist.groupby(["CODIGO","PRODUCTO","LINEA","fecha_str"]).agg(
-        BATCH_PLAN=("Nro Documento","count"), CANT_PLAN=("Cantidad Planificada","sum")
-    ).reset_index().sort_values(["CODIGO","fecha_str"])
-
-    resumen_hist["CANT_PLAN"] = pd.to_numeric(resumen_hist["CANT_PLAN"], errors="coerce").fillna(0)
-
-    def get_real(codigo, fecha):
-        r = produccion_real.get(key_reg(fecha, codigo), {})
-        return r.get("batch_real",0), r.get("cant_real",0.0)
-
-    resumen_hist[["BATCH_REAL","CANT_REAL"]] = resumen_hist.apply(
-        lambda r: pd.Series(get_real(r["CODIGO"], r["fecha_str"])), axis=1)
-    resumen_hist["BATCH_PEND"] = (resumen_hist["BATCH_PLAN"]-resumen_hist["BATCH_REAL"]).clip(lower=0).astype(int)
-    resumen_hist["CANT_PEND"]  = (resumen_hist["CANT_PLAN"] -resumen_hist["CANT_REAL"]).clip(lower=0).round(2)
-    hist_pend = resumen_hist[resumen_hist["BATCH_PEND"]>0].copy()
-
-    kp1, kp2, kp3, kp4 = st.columns(4)
-    for col, lbl, val, cls in [
-        (kp1,"🔴 Productos con Pendiente", str(hist_pend["CODIGO"].nunique()),       "kpi-red"),
-        (kp2,"📅 Fechas Afectadas",        str(hist_pend["fecha_str"].nunique()),    "kpi-orange"),
-        (kp3,"🔢 BATCH Pendientes Total",  str(int(hist_pend["BATCH_PEND"].sum())), "kpi-orange"),
-        (kp4,"⚖️ Cant. Pendiente Total",  f"{float(hist_pend['CANT_PEND'].sum()):,.1f}", "kpi-orange"),
-    ]:
-        with col:
-            st.markdown(f'<div class="kpi-card"><div class="kpi-label">{lbl}</div>'
-                        f'<div class="kpi-value {cls}">{val}</div></div>', unsafe_allow_html=True)
-    st.markdown("")
-
-    if hist_pend.empty:
-        st.success("🎉 ¡Sin pendientes históricos! Todo está al día.")
-    else:
-        cbp1, cbp2 = st.columns([2,2])
-        with cbp1:
-            lineas_pend = ["— Todas —"] + sorted(hist_pend["LINEA"].dropna().unique().tolist())
-            linea_pend  = st.selectbox("🏭 Filtrar por Línea", lineas_pend, key="linea_pend")
-        prods_pend = hist_pend[hist_pend["LINEA"]==linea_pend] if linea_pend != "— Todas —" else hist_pend
-        lista_prods = sorted(prods_pend[["CODIGO","PRODUCTO"]].drop_duplicates()
-                             .apply(lambda r: f"{r['CODIGO']} — {r['PRODUCTO']}", axis=1).tolist())
-        with cbp2:
-            if not lista_prods:
-                st.info("No hay pendientes para esta línea.")
-                st.stop()
-            prod_sel = st.selectbox("📦 Selecciona un producto", lista_prods, key="prod_pend")
-
-        codigo_sel   = prod_sel.split(" — ")[0].strip()
-        detalle_prod = hist_pend[hist_pend["CODIGO"]==codigo_sel].sort_values("fecha_str")
-
-        if not detalle_prod.empty:
-            nombre_prod = detalle_prod.iloc[0]["PRODUCTO"]
-            linea_prod  = detalle_prod.iloc[0]["LINEA"]
             st.markdown(f"""
-            <div style="background:#f0f9ff;border-radius:10px;padding:0.8rem 1.2rem;
-                        margin:0.8rem 0;border-left:4px solid #b91c1c;">
-              <span style="color:#555;font-size:0.82rem;">PRODUCTO: </span>
-              <span style="color:#1a1a2e;font-size:0.95rem;font-weight:700;">{nombre_prod}</span>
-              &nbsp;&nbsp;
-              <span style="color:#555;font-size:0.82rem;">LÍNEA: </span>
-              <span style="color:#1a1a2e;font-size:0.85rem;font-weight:600;">{linea_prod}</span>
-              &nbsp;&nbsp;
-              <span style="color:#555;font-size:0.82rem;">BATCH PENDIENTES TOTALES: </span>
-              <span style="color:#b91c1c;font-size:0.95rem;font-weight:700;">{int(detalle_prod["BATCH_PEND"].sum())}</span>
+            <div style="background:#f9fafb;border:1px solid #fecaca;border-radius:8px;
+                        padding:0.5rem 1rem;margin:0.4rem 0;border-left:3px solid
+                        {'#b91c1c' if fpos==0 else '#0891b2'};font-size:0.84rem;">
+              <span style="color:#555;">Fecha: </span>
+              <span style="color:#1a1a2e;font-weight:600;">{f_disp}</span>
+              &nbsp;&nbsp;{badge}
+              &nbsp;&nbsp;<span style="color:#555;">Plan: </span>
+              <span style="color:#1a1a2e;font-weight:600;">{bp_f} BATCH</span>
+              &nbsp;&nbsp;<span style="color:#555;">Producido: </span>
+              <span style="color:#0e7490;font-weight:600;">{br_f} BATCH</span>
+              &nbsp;&nbsp;<span style="color:#555;">Pendiente: </span>
+              <span style="color:#b91c1c;font-weight:700;">{pend_b_f} BATCH</span>
             </div>
             """, unsafe_allow_html=True)
-            st.markdown("**Declara siempre desde la fecha más antigua ↓ (FIFO)**")
 
-            for fpos, (_, frow) in enumerate(detalle_prod.iterrows()):
-                f_str    = frow["fecha_str"]
-                f_disp   = datetime.strptime(f_str,"%Y-%m-%d").strftime("%d/%m/%Y")
-                bp_f, cp_f = int(frow["BATCH_PLAN"]), float(frow["CANT_PLAN"])
-                br_f, cr_f = int(frow["BATCH_REAL"]), float(frow["CANT_REAL"])
-                pend_b_f   = int(frow["BATCH_PEND"])
-                pend_c_f   = float(frow["CANT_PEND"])
-                k_f        = key_reg(f_str, codigo_sel)
-                ukey_f     = f"fifo_{codigo_sel}_{f_str}_{fpos}"
-                badge = ('<span style="background:#b91c1c;color:#fff;font-size:0.72rem;padding:2px 10px;border-radius:12px;font-weight:700;">⬆ DECLARAR PRIMERO</span>'
-                         if fpos==0 else
-                         f'<span style="background:#e0f7fa;color:#0e7490;font-size:0.72rem;padding:2px 10px;border-radius:12px;">#{fpos+1} en cola</span>')
+            mc1, mc2, mc3, mc4 = st.columns(4)
+            mc1.metric("BATCH Plan",      bp_f)
+            mc2.metric("BATCH Producido", br_f)
+            mc3.metric("BATCH Pendiente", pend_b_f)
+            mc4.metric("Cant. Pendiente", f"{pend_c_f:,.2f}")
 
-                with st.expander(f"📅 {f_disp}  —  {pend_b_f} BATCH pendientes", expanded=(fpos==0)):
-                    st.markdown(f"""
-                    <div style="background:#f0f9ff;border-radius:8px;padding:0.5rem 1rem;
-                                margin-bottom:0.8rem;border-left:3px solid #0891b2;font-size:0.85rem;">
-                      <span style="color:#555;">Fecha: </span>
-                      <span style="color:#1a1a2e;font-weight:600;">{f_disp}</span>&nbsp;&nbsp;{badge}
-                      &nbsp;&nbsp;<span style="color:#555;">BATCH Plan: </span><span style="color:#1a1a2e;font-weight:600;">{bp_f}</span>
-                      &nbsp;&nbsp;<span style="color:#555;">Ya producido: </span><span style="color:#0e7490;font-weight:600;">{br_f}</span>
-                      &nbsp;&nbsp;<span style="color:#555;">Pendiente: </span><span style="color:#b91c1c;font-weight:700;">{pend_b_f}</span>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    fm1, fm2, fm3, fm4 = st.columns(4)
-                    fm1.metric("BATCH Plan", bp_f)
-                    fm2.metric("BATCH Producido", br_f)
-                    fm3.metric("BATCH Pendiente", pend_b_f)
-                    fm4.metric("Cant. Pendiente", f"{pend_c_f:,.2f}")
-
-                    if pend_b_f == 0:
-                        st.success(f"✅ Completado — {br_f} de {bp_f} BATCH producidos.")
+            fi1, fi2, fi3 = st.columns([2, 2, 1])
+            with fi1:
+                nb_f = st.number_input(
+                    "BATCH a registrar ahora",
+                    min_value=0, max_value=pend_b_f, value=0, step=1,
+                    key=f"nb_{ukey_f}_{st.session_state.reg_count_p}"
+                )
+            with fi2:
+                nc_f = st.number_input(
+                    "Cantidad a registrar ahora",
+                    min_value=0.0,
+                    max_value=float(pend_c_f) if pend_c_f > 0 else float(cp_f),
+                    value=0.0, step=0.5, format="%.2f",
+                    key=f"nc_{ukey_f}_{st.session_state.reg_count_p}"
+                )
+            with fi3:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("💾 Registrar", key=f"sv_{ukey_f}_{st.session_state.reg_count_p}",
+                             use_container_width=True):
+                    if nb_f == 0:
+                        st.warning("⚠️ Ingresa al menos 1 BATCH")
                     else:
-                        st.markdown(f"**Ingresa los BATCH que produces ahora** (pendiente: {pend_b_f} BATCH)")
-                        fi1, fi2, fi3 = st.columns([2,2,1])
-                        with fi1:
-                            nb_fifo = st.number_input(
-                                "BATCH a registrar ahora",
-                                min_value=0, max_value=pend_b_f,
-                                value=0, step=1, key=f"nbatch_{ukey_f}_{st.session_state.registro_count}"
-                            )
-                        with fi2:
-                            nc_fifo = st.number_input(
-                                "Cantidad a registrar ahora",
-                                min_value=0.0,
-                                max_value=float(pend_c_f) if pend_c_f > 0 else float(cp_f),
-                                value=0.0, step=0.5, format="%.2f", key=f"ncant_{ukey_f}_{st.session_state.registro_count}"
-                            )
-                        with fi3:
-                            st.markdown("<br>", unsafe_allow_html=True)
-                            if st.button("💾 Registrar", key=f"nsave_{ukey_f}_{st.session_state.registro_count}", use_container_width=True):
-                                if nb_fifo == 0:
-                                    st.warning("⚠️ Ingresa al menos 1 BATCH")
-                                else:
-                                    batch_acum = br_f + nb_fifo
-                                    cant_acum  = cr_f + nc_fifo
-                                    datos = {
-                                        "batch_real": batch_acum,
-                                        "cant_real":  cant_acum,
-                                        "timestamp":  datetime.now().isoformat(),
-                                        "codigo":     codigo_sel,
-                                        "producto":   nombre_prod,
-                                        "fecha":      f_str
-                                    }
-                                    with st.spinner("Guardando..."):
-                                        guardar_produccion_gsheet(k_f, datos)
-                                    st.session_state.registro_count += 1
-                                    pend_nuevo = max(bp_f - batch_acum, 0)
-                                    if pend_nuevo == 0:
-                                        st.success(f"✅ ¡Completado! {batch_acum} de {bp_f} BATCH producidos.")
-                                    else:
-                                        st.success(f"✅ Registrado — Total: {batch_acum}/{bp_f} BATCH · Pendiente: {pend_nuevo}")
-                                    time.sleep(0.5)
-                                    st.rerun()
+                        batch_acum = br_f + nb_f
+                        cant_acum  = cr_f  + nc_f
+                        datos = {
+                            "batch_real": batch_acum,
+                            "cant_real":  cant_acum,
+                            "timestamp":  datetime.now().isoformat(),
+                            "codigo":     codigo,
+                            "producto":   producto,
+                            "fecha":      f_str
+                        }
+                        with st.spinner("Guardando..."):
+                            guardar_produccion_p(prod_file, k_f, datos)
+                        st.session_state.reg_count_p += 1
+                        pend_nuevo = max(bp_f - batch_acum, 0)
+                        if pend_nuevo == 0:
+                            st.success(f"✅ ¡Completado! {batch_acum}/{bp_f} BATCH — fecha {f_disp} saldada.")
+                        else:
+                            st.success(f"✅ Registrado — {batch_acum}/{bp_f} BATCH · Pendiente: {pend_nuevo}")
+                        time.sleep(0.5)
+                        st.rerun()
 
             st.markdown("---")
-            df_fr = detalle_prod[["fecha_str","BATCH_PLAN","BATCH_REAL","BATCH_PEND","CANT_PLAN","CANT_REAL","CANT_PEND"]].copy()
-            df_fr.columns = ["Fecha","BATCH Plan","BATCH Real","BATCH Pend.","Cant. Plan","Cant. Real","Cant. Pend."]
-            df_fr["Fecha"] = pd.to_datetime(df_fr["Fecha"]).dt.strftime("%d/%m/%Y")
 
-            def color_pend(val):
-                if isinstance(val,(int,float)) and val>0:  return "color:#b91c1c;font-weight:600"
-                if isinstance(val,(int,float)) and val==0: return "color:#0e7490"
-                return ""
+        # Tabla resumen del producto
+        df_res = fechas_prod[["fecha_str","BATCH_PLAN","BATCH_REAL","BATCH_PEND",
+                               "CANT_PLAN","CANT_REAL","CANT_PEND"]].copy()
+        df_res.columns = ["Fecha","BATCH Plan","BATCH Real","BATCH Pend.",
+                          "Cant. Plan","Cant. Real","Cant. Pend."]
+        df_res["Fecha"] = pd.to_datetime(df_res["Fecha"]).dt.strftime("%d/%m/%Y")
 
-            st.dataframe(
-                df_fr.style.map(color_pend, subset=["BATCH Pend.","Cant. Pend."])
-                .format({"Cant. Plan":"{:,.2f}","Cant. Real":"{:,.2f}","Cant. Pend.":"{:,.2f}"})
-                .hide(axis="index"), use_container_width=True
-            )
+        def color_pend(val):
+            if isinstance(val, (int, float)) and val > 0:  return "color:#b91c1c;font-weight:600"
+            if isinstance(val, (int, float)) and val == 0: return "color:#0e7490"
+            return ""
+
+        st.dataframe(
+            df_res.style
+            .map(color_pend, subset=["BATCH Pend.", "Cant. Pend."])
+            .format({"Cant. Plan":"{:,.2f}", "Cant. Real":"{:,.2f}", "Cant. Pend.":"{:,.2f}"})
+            .hide(axis="index"),
+            use_container_width=True
+        )
 
 # ── FOOTER ────────────────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown(
-    f'<p style="text-align:center;color:#0891b2;font-size:0.78rem;">'
-    f'🏭 Control de Producción v5.0 · Google Sheets · Datos persistentes · '
-    f'{dias_cargados} día(s) cargado(s)</p>',
+    f'<p style="text-align:center;color:#b91c1c;font-size:0.78rem;">'
+    f'⚠️ Pateadas — Control de Producción v5.0 Local · '
+    f'Fechas anteriores al {hoy.strftime("%d/%m/%Y")} · FIFO</p>',
     unsafe_allow_html=True
 )
