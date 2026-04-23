@@ -12,13 +12,20 @@ SHEET_NAME = "Sheet1"
 
 @st.cache_resource
 def get_sheet():
-    # Convertir AttrDict de st.secrets a dict normal y corregir private_key
-    info = dict(st.secrets["gcp_service_account"])
-    # Asegurar que el private_key tenga saltos de línea reales (no literales \n)
-    info["private_key"] = info["private_key"].replace("\\n", "\n")
-    creds  = Credentials.from_service_account_info(info, scopes=SCOPES)
-    client = gspread.authorize(creds)
-    sh     = client.open_by_key(SHEET_ID)
+    credentials = {
+        "type": "service_account",
+        "project_id": st.secrets["gcp_service_account"]["project_id"],
+        "private_key_id": st.secrets["gcp_service_account"]["private_key_id"],
+        "private_key": st.secrets["gcp_service_account"]["private_key"],
+        "client_email": st.secrets["gcp_service_account"]["client_email"],
+        "client_id": st.secrets["gcp_service_account"]["client_id"],
+        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        "token_uri": "https://oauth2.googleapis.com/token",
+        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        "client_x509_cert_url": st.secrets["gcp_service_account"]["client_x509_cert_url"],
+    }
+    client = gspread.service_account_from_dict(credentials)
+    sh = client.open_by_key(SHEET_ID)
     try:
         ws = sh.worksheet(SHEET_NAME)
     except gspread.WorksheetNotFound:
