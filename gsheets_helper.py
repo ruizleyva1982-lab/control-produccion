@@ -12,7 +12,11 @@ SHEET_NAME = "Sheet1"
 
 @st.cache_resource
 def get_sheet():
-    creds  = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=SCOPES)
+    # Convertir AttrDict de st.secrets a dict normal y corregir private_key
+    info = dict(st.secrets["gcp_service_account"])
+    # Asegurar que el private_key tenga saltos de línea reales (no literales \n)
+    info["private_key"] = info["private_key"].replace("\\n", "\n")
+    creds  = Credentials.from_service_account_info(info, scopes=SCOPES)
     client = gspread.authorize(creds)
     sh     = client.open_by_key(SHEET_ID)
     try:
