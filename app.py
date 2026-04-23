@@ -65,8 +65,8 @@ div[data-testid="stExpander"] span { color: #1a1a2e !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── RUTAS ─────────────────────────────────────────────────────────────────────
-BASE_DIR         = r"C:\Users\sergioruiz\Reportes\produccion"
+# ── RUTAS (relativas al repo — funciona en Streamlit Cloud y local) ───────────
+BASE_DIR         = os.path.dirname(os.path.abspath(__file__))
 PRODUCTOS_FILE   = os.path.join(BASE_DIR, "maestro_productos.xlsx")
 PROGRAMACION_DIR = os.path.join(BASE_DIR, "programacion")
 PRODUCCION_FILE  = os.path.join(BASE_DIR, "produccion_real.json")
@@ -139,10 +139,9 @@ def archivos_disponibles(carpeta: str) -> list:
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ Configuración")
-    base_dir = st.text_input("📁 Carpeta base", value=BASE_DIR)
-    productos_path = os.path.join(base_dir, "maestro_productos.xlsx")
-    prog_dir       = os.path.join(base_dir, "programacion")
-    prod_file      = os.path.join(base_dir, "produccion_real.json")
+    productos_path = PRODUCTOS_FILE
+    prog_dir       = PROGRAMACION_DIR
+    prod_file      = PRODUCCION_FILE
 
     st.markdown("---")
     auto_refresh = st.toggle("🔄 Auto-actualizar", value=False)
