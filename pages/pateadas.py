@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
-import json, os, glob, time
+import os, glob, time
+from gsheets_helper import cargar_produccion_sheets, guardar_produccion_sheets
 
 # ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -80,17 +81,14 @@ if "reg_count_p" not in st.session_state:
 
 # ── RUTAS (relativas al repo — funciona en Streamlit Cloud y local) ───────────
 _ROOT            = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BASE_DIR         = _ROOT
 PRODUCTOS_FILE   = os.path.join(_ROOT, "maestro_productos.xlsx")
 PROGRAMACION_DIR = os.path.join(_ROOT, "programacion")
-PRODUCCION_FILE  = os.path.join(_ROOT, "produccion_real.json")
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ Configuración")
     productos_path = PRODUCTOS_FILE
     prog_dir       = PROGRAMACION_DIR
-    prod_file      = PRODUCCION_FILE
 
     st.markdown("---")
     if st.button("🔃 Recargar datos", use_container_width=True):
@@ -138,20 +136,8 @@ def cargar_programacion_p(carpeta: str) -> pd.DataFrame:
             pass
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
-def cargar_produccion_p(path: str) -> dict:
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return json.load(f)
-    return {}
-
-def guardar_produccion_p(prod_file: str, key: str, datos: dict):
-    st.session_state.produccion_real_p[key] = datos
-    try:
-        os.makedirs(os.path.dirname(prod_file), exist_ok=True)
-        with open(prod_file, "w") as f:
-            json.dump(st.session_state.produccion_real_p, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        st.warning(f"⚠️ Error guardando: {e}")
+def guardar_produccion_p(key: str, datos: dict):
+    guardar_produccion_sheets(st.session_state.produccion_real_p, key, datos)
 
 def key_reg(fecha_str: str, codigo: str) -> str:
     return f"{fecha_str}||{codigo}"
@@ -180,7 +166,7 @@ if df_programacion.empty:
     st.stop()
 
 if not st.session_state.pateadas_loaded:
-    st.session_state.produccion_real_p = cargar_produccion_p(prod_file)
+    st.session_state.produccion_real_p = cargar_produccion_sheets()
     st.session_state.pateadas_loaded   = True
 
 produccion_real = st.session_state.produccion_real_p
@@ -434,7 +420,7 @@ for _, prod_row in productos_unicos.iterrows():
                             "fecha":      f_str
                         }
                         with st.spinner("Guardando..."):
-                            guardar_produccion_p(prod_file, k_f, datos)
+                            guardar_produccion_p(k_f, datos)
                         st.session_state.reg_count_p += 1
                         pend_nuevo = max(bp_f - batch_acum, 0)
                         if pend_nuevo == 0:

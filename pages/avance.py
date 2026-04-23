@@ -3,7 +3,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, date
-import json, os, glob
+import os, glob
+from gsheets_helper import cargar_produccion_sheets
 
 # ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -50,7 +51,6 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 _ROOT            = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PRODUCTOS_FILE   = os.path.join(_ROOT, "maestro_productos.xlsx")
 PROGRAMACION_DIR = os.path.join(_ROOT, "programacion")
-PRODUCCION_FILE  = os.path.join(_ROOT, "produccion_real.json")
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -98,12 +98,6 @@ def cargar_programacion(carpeta):
             pass
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
-def cargar_produccion(path):
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return json.load(f)
-    return {}
-
 def color_pct(pct):
     if pct >= 100: return "#16a34a"
     if pct >= 75:  return "#2563eb"
@@ -112,15 +106,15 @@ def color_pct(pct):
 
 # ── VALIDAR ARCHIVOS ──────────────────────────────────────────────────────────
 errores = []
-if not os.path.exists(PRODUCTOS_FILE):   errores.append(f"❌ No se encuentra `maestro_productos.xlsx`")
-if not os.path.exists(PROGRAMACION_DIR): errores.append(f"❌ No se encuentra la carpeta `programacion/`")
+if not os.path.exists(PRODUCTOS_FILE):   errores.append("❌ No se encuentra `maestro_productos.xlsx`")
+if not os.path.exists(PROGRAMACION_DIR): errores.append("❌ No se encuentra la carpeta `programacion/`")
 if errores:
     for e in errores: st.error(e)
     st.stop()
 
 df_productos    = cargar_productos(PRODUCTOS_FILE)
 df_programacion = cargar_programacion(PROGRAMACION_DIR)
-produccion_real = cargar_produccion(PRODUCCION_FILE)
+produccion_real = cargar_produccion_sheets()
 
 if df_programacion.empty:
     st.warning("⚠️ No se pudo leer ningún archivo de programación.")
