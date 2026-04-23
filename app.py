@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import json, os, time, glob
+import os, time, glob
+from gsheets_helper import cargar_produccion_sheets, guardar_produccion_sheets
 
 # ── SESSION STATE ─────────────────────────────────────────────────────────────
 if "produccion_real" not in st.session_state:
@@ -69,7 +70,6 @@ div[data-testid="stExpander"] span { color: #1a1a2e !important; }
 BASE_DIR         = os.path.dirname(os.path.abspath(__file__))
 PRODUCTOS_FILE   = os.path.join(BASE_DIR, "maestro_productos.xlsx")
 PROGRAMACION_DIR = os.path.join(BASE_DIR, "programacion")
-PRODUCCION_FILE  = os.path.join(BASE_DIR, "produccion_real.json")
 
 # ── FUNCIONES ─────────────────────────────────────────────────────────────────
 @st.cache_data(ttl=60)
@@ -107,21 +107,6 @@ def cargar_programacion(carpeta: str) -> pd.DataFrame:
             pass
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
-def cargar_produccion_local() -> dict:
-    if os.path.exists(PRODUCCION_FILE):
-        with open(PRODUCCION_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-def guardar_produccion_local(key: str, datos: dict):
-    st.session_state.produccion_real[key] = datos
-    try:
-        os.makedirs(os.path.dirname(PRODUCCION_FILE), exist_ok=True)
-        with open(PRODUCCION_FILE, "w") as f:
-            json.dump(st.session_state.produccion_real, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        st.warning(f"⚠️ Error guardando archivo: {e}")
-
 def key_reg(fecha_str: str, codigo: str) -> str:
     return f"{fecha_str}||{codigo}"
 
@@ -141,7 +126,6 @@ with st.sidebar:
     st.markdown("### ⚙️ Configuración")
     productos_path = PRODUCTOS_FILE
     prog_dir       = PROGRAMACION_DIR
-    prod_file      = PRODUCCION_FILE
 
     st.markdown("---")
     auto_refresh = st.toggle("🔄 Auto-actualizar", value=False)
@@ -149,8 +133,8 @@ with st.sidebar:
 
     if st.button("🔃 Recargar datos ahora", use_container_width=True):
         st.cache_data.clear()
-        st.session_state.produccion_real = cargar_produccion_local()
-        st.session_state.sheets_cargado  = True
+        st.session_state.produccion_real  = cargar_produccion_sheets()
+        st.session_state.sheets_cargado   = True
         st.rerun()
 
     st.markdown("---")
@@ -228,7 +212,7 @@ if df_programacion.empty:
 
 # Cargar produccion_real solo la primera vez
 if not st.session_state.sheets_cargado:
-    st.session_state.produccion_real = cargar_produccion_local()
+    st.session_state.produccion_real = cargar_produccion_sheets()
     st.session_state.sheets_cargado  = True
 
 produccion_real = st.session_state.produccion_real
@@ -485,7 +469,7 @@ with tab2:
                                     "fecha":      fecha_str
                                 }
                                 with st.spinner("Guardando..."):
-                                    guardar_produccion_local(k, datos)
+                                    guardar_produccion_sheets(st.session_state.produccion_real, k, datos)
                                 st.session_state.registro_count += 1
                                 pend_nuevo = max(bp - batch_acum, 0)
                                 if pend_nuevo == 0:
@@ -567,7 +551,7 @@ st.markdown("---")
 n_dias = int(df_programacion["_archivo"].nunique()) if not df_programacion.empty else 0
 st.markdown(
     f'<p style="text-align:center;color:#0891b2;font-size:0.78rem;">'
-    f'🏭 Control de Producción v5.0 Local · {{n_dias}} día(s) cargado(s) · '
-    f'Datos en <code>produccion_real.json</code></p>',
+    f'🏭 Control de Producción v5.0 · {n_dias} día(s) cargado(s) · '
+    f'Datos en <code>Google Sheets</code></p>',
     unsafe_allow_html=True
 )
