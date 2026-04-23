@@ -159,9 +159,9 @@ def key_reg(fecha_str: str, codigo: str) -> str:
 # ── VALIDAR Y CARGAR ARCHIVOS ─────────────────────────────────────────────────
 errores = []
 if not os.path.exists(productos_path):
-    errores.append(f"❌ No se encuentra `maestro_productos.xlsx` en: `{base_dir_p}`")
+    errores.append(f"❌ No se encuentra `maestro_productos.xlsx` en: `{BASE_DIR}`")
 if not os.path.exists(prog_dir):
-    errores.append(f"❌ No se encuentra la carpeta `programacion/` en: `{base_dir_p}`")
+    errores.append(f"❌ No se encuentra la carpeta `programacion/` en: `{BASE_DIR}`")
 
 if errores:
     for e in errores:
@@ -190,10 +190,15 @@ hoy = date.today()
 df_hist = df_programacion[df_programacion["Cod Item"].isin(df_productos["CODIGO"])].copy()
 df_hist = df_hist.merge(df_productos[["CODIGO","PRODUCTO","LINEA"]],
                         left_on="Cod Item", right_on="CODIGO", how="left")
-df_hist["fecha_date"] = df_hist["Fecha de Vencimiento"].dt.date
-df_hist["fecha_str"]  = df_hist["Fecha de Vencimiento"].dt.strftime("%Y-%m-%d")
 
-# ─ SOLO fechas ANTERIORES a hoy ──────────────────────────────────────────────
+# Normalizar a date puro, eliminando hora si la hubiera
+df_hist["fecha_date"] = pd.to_datetime(df_hist["Fecha de Vencimiento"], errors="coerce").dt.date
+df_hist["fecha_str"]  = pd.to_datetime(df_hist["Fecha de Vencimiento"], errors="coerce").dt.strftime("%Y-%m-%d")
+
+# Eliminar filas sin fecha válida
+df_hist = df_hist[df_hist["fecha_date"].notna()]
+
+# ─ SOLO fechas ESTRICTAMENTE ANTERIORES a hoy (ayer hacia atrás) ─────────────
 df_hist = df_hist[df_hist["fecha_date"] < hoy]
 
 resumen = df_hist.groupby(["CODIGO","PRODUCTO","LINEA","fecha_str"]).agg(
