@@ -338,64 +338,6 @@ fig_linea.update_layout(
 )
 st.plotly_chart(fig_linea, use_container_width=True)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# GRÁFICO 3 — HEATMAP FECHA vs LÍNEA
-# ══════════════════════════════════════════════════════════════════════════════
-st.markdown('<div class="section-title">🔥 Heatmap — Avance % por Fecha y Línea</div>',
-            unsafe_allow_html=True)
-
-heatmap_data = df_f.groupby(["fecha_disp","LINEA"]).agg(
-    BATCH_PLAN=("BATCH_PLAN","sum"),
-    BATCH_REAL=("BATCH_REAL","sum"),
-).reset_index()
-heatmap_data["PCT"] = (heatmap_data["BATCH_REAL"] / heatmap_data["BATCH_PLAN"] * 100).clip(0,100).round(1)
-
-# Pivot para heatmap: filas=LINEA, columnas=fecha
-pivot = heatmap_data.pivot_table(
-    index="LINEA", columns="fecha_disp", values="PCT", aggfunc="mean"
-).round(1)
-
-# Ordenar columnas por fecha real
-cols_ordenadas = sorted(pivot.columns,
-                        key=lambda x: datetime.strptime(x, "%d/%m/%Y"))
-pivot = pivot[cols_ordenadas]
-
-# Texto de anotaciones
-text_matrix = pivot.applymap(lambda v: f"{v:.0f}%" if pd.notna(v) else "—")
-
-fig_heat = go.Figure(data=go.Heatmap(
-    z=pivot.values,
-    x=pivot.columns.tolist(),
-    y=pivot.index.tolist(),
-    text=text_matrix.values,
-    texttemplate="%{text}",
-    textfont=dict(size=13, family="Inter", color="white"),
-    colorscale=[
-        [0.0,  "#b91c1c"],   # 0%   rojo
-        [0.5,  "#f59e0b"],   # 50%  naranja
-        [0.75, "#2563eb"],   # 75%  azul
-        [1.0,  "#16a34a"],   # 100% verde
-    ],
-    zmin=0, zmax=100,
-    colorbar=dict(
-        title="% Avance",
-        ticksuffix="%",
-        tickvals=[0, 25, 50, 75, 100],
-    ),
-    hoverongaps=False,
-    hovertemplate="<b>%{y}</b><br>Fecha: %{x}<br>Avance: %{z:.1f}%<extra></extra>",
-))
-
-fig_heat.update_layout(
-    xaxis=dict(title="Fecha", side="bottom"),
-    yaxis=dict(title="Línea", autorange="reversed"),
-    plot_bgcolor="white", paper_bgcolor="white",
-    margin=dict(t=20, b=40, l=20, r=20),
-    height=max(350, len(pivot) * 45),
-    font=dict(family="Inter"),
-)
-st.plotly_chart(fig_heat, use_container_width=True)
-
 # ── NOTA AL PIE ───────────────────────────────────────────────────────────────
 st.markdown("---")
 
