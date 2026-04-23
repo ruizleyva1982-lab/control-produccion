@@ -176,6 +176,10 @@ with st.sidebar:
     st.page_link("pages/pateadas.py", label="Ver Pateadas 🔴", icon="⚠️",
                  help="Productos con BATCH sin declarar de días anteriores a hoy")
     st.markdown("---")
+    st.markdown("### 📈 Análisis")
+    st.page_link("pages/avance.py", label="Avance de Producción 📊", icon="📈",
+                 help="Avance porcentual por fecha y por línea con gráficos")
+    st.markdown("---")
     st.caption("🏭 **Control de Producción v5.0 Local**")
 
 # ── AUTO REFRESH ──────────────────────────────────────────────────────────────
