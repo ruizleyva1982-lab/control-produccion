@@ -151,19 +151,30 @@ hoy = date.today()
 # ── FILTROS EN SIDEBAR ────────────────────────────────────────────────────────
 with st.sidebar:
     fechas_disp = sorted(resumen["fecha_date"].unique())
-    fechas_label = {str(f): datetime.strptime(str(f), "%Y-%m-%d").strftime("%d/%m/%Y")
-                    for f in fechas_disp}
-    fechas_sel = st.multiselect(
-        "📅 Fechas a analizar",
-        options=[str(f) for f in fechas_disp],
-        default=[str(f) for f in fechas_disp],
-        format_func=lambda x: fechas_label[x]
+    fecha_min   = fechas_disp[0]  if fechas_disp else hoy
+    fecha_max   = fechas_disp[-1] if fechas_disp else hoy
+
+    rango = st.date_input(
+        "📅 Rango de vencimiento",
+        value=(fecha_min, fecha_max),
+        min_value=fecha_min,
+        max_value=fecha_max,
+        format="DD/MM/YYYY",
     )
+    # Soportar selección parcial (solo fecha inicio)
+    if isinstance(rango, (list, tuple)) and len(rango) == 2:
+        fecha_desde, fecha_hasta = rango
+    else:
+        fecha_desde = fecha_hasta = rango[0] if rango else fecha_min
+
     lineas_disp = ["— Todas —"] + sorted(resumen["LINEA"].dropna().unique().tolist())
     linea_sel   = st.selectbox("🏭 Línea", lineas_disp)
 
 # Aplicar filtros
-df_f = resumen[resumen["fecha_str"].isin(fechas_sel)].copy()
+df_f = resumen[
+    (resumen["fecha_date"] >= fecha_desde) &
+    (resumen["fecha_date"] <= fecha_hasta)
+].copy()
 if linea_sel != "— Todas —":
     df_f = df_f[df_f["LINEA"] == linea_sel]
 
